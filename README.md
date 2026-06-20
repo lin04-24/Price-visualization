@@ -1,16 +1,18 @@
 # Price Visualization
 
-Steam 市场情报站配置管理面板。项目已迁移为 Next.js App Router 架构，前端使用 React 组件实现，后端接口使用 Next Route Handlers，配置数据存储在本地 SQLite 数据库中。
+Steam 市场情报站配置管理面板。项目基于 Next.js App Router、React、TypeScript 和 SQLite，支持武器箱/饰品价格配置、CSQAQ 价格查询、自动批量监控与 QQ 邮箱提醒。
 
 ## 功能概览
 
-- 武器箱配置管理：新增、编辑、删除、启用/禁用监控，并可点击武器箱查看饰品市场详情。
-- 全局开关配置：BUFF / 悠悠有品、Steam、涨跌幅监控。
-- CSQAQ 接入：每天自动同步武器箱/收藏品总览到 SQLite；添加时支持输入残缺名称选择候选，再查询 good_id，并展示当前饰品在网易 BUFF、悠悠有品、Steam 市场的在售价；服务端对外部 API 做短缓存、串行节流与 429 重试。
-- 冷却期配置：按不同规则设置冷却天数，并支持一键重置。
-- 抓取配置：执行间隔、页面超时；抓取固定为单线程，不并发。
+- 武器箱配置管理：新增、编辑、删除、启用/禁用监控，点击卡片查看当前市场详情。
+- 全局开关配置：分别控制 BUFF / 悠悠有品、Steam 的上下限提醒。
+- 批量查询：手动批量查询已配置饰品的 BUFF、悠悠有品、Steam 当前价格。
+- 自动监控：服务端每 30 分钟自动执行一次批量查询；若价格超出用户设置的各平台上下限，会发送邮件提醒。
+- 邮件提醒：提醒内容包含中文名、ID、英文名、各平台价格和触发原因。
+- CSQAQ 接入：服务端对外部 API 做短缓存、串行节流与 429 重试。
 - 本地 SQLite 持久化：默认数据库为 `data/app.db`。
 - 首次启动自动从 `data/settings.json` 和 `data/cases_state.json` 迁移数据。
+- 所有确认/提示弹窗均为应用内样式弹窗，不使用浏览器原生 `alert/confirm/prompt`。
 
 ## 技术栈
 
@@ -22,7 +24,7 @@ Steam 市场情报站配置管理面板。项目已迁移为 Next.js App Router 
 
 ## 环境要求
 
-推荐使用 Node.js 20.17 或更新版本。本项目使用 `sqlite3` 持久化本地数据，不再依赖 Node.js 内置实验性 `node:sqlite`。
+推荐使用 Node.js 20.17 或更新版本。
 
 检查版本：
 
@@ -33,25 +35,35 @@ npm --version
 
 ## 环境变量
 
-项目通过 CSQAQ API 查询饰品 good_id 和单件饰品市场价格。请在项目根目录创建 `.env`：
+在项目根目录创建 `.env`。`.env` 已被 `.gitignore` 忽略，不会提交到 GitHub。
 
-```powershell
+```env
 CSQAQ_API_TOKEN=你的 CSQAQ API Token
+SEND_MAIL=发件 QQ 邮箱
+SEND_KEY=QQ 邮箱 SMTP 授权码
+ACCEPT_MAIL=收件邮箱，多个可用英文逗号或分号分隔
+SEND_PORT=465
 ```
 
-`.env` 已被 `.gitignore` 忽略，不会提交到 GitHub。修改环境变量后需要重新启动 Next.js 服务。
+邮件配置等价于：
 
-注意：CSQAQ 单件详情接口需要饰品 `good_id`，不是武器箱/收藏品 ID。旧配置如果保存过收藏品 ID，请在添加/编辑弹窗中输入饰品中文名并点击“查询饰品ID”重新填入。
-
-收藏品总览会缓存在 SQLite 表 `csqaq_containers` 中。服务启动后会启动后台检查任务，每小时检查一次，超过 24 小时会自动调用 CSQAQ `container_data_info` 刷新；添加饰品时输入 2 个以上字符也会触发缓存检查。也可以手动刷新：
-
-```powershell
-Invoke-WebRequest -Method POST http://127.0.0.1:3000/api/csqaq/containers
+```json
+{
+  "email": {
+    "enabled": true,
+    "smtp_host": "smtp.qq.com",
+    "smtp_port": "SEND_PORT",
+    "smtp_user": "SEND_MAIL",
+    "smtp_password": "SEND_KEY",
+    "from_addr": "SEND_MAIL",
+    "to_addr": "ACCEPT_MAIL"
+  }
+}
 ```
 
-CSQAQ 查询在服务端有保护层：请求会串行排队并保持约 1.2 秒间隔；饰品名称查询缓存 10 分钟，饰品详情缓存 5 分钟；遇到 HTTP 429 会按退避策略最多重试 3 次。如果 API Token 已经进入平台限流窗口，接口会返回 429 和“请求过于频繁，请稍后再试”的提示，等待一段时间后再操作即可。
+修改 `.env` 后需要重启服务。
 
-## 本地开发部署
+## Windows 部署流程
 
 1. 克隆仓库：
 
@@ -60,75 +72,192 @@ git clone https://github.com/lin04-24/Price-visualization.git
 cd Price-visualization
 ```
 
-2. 安装依赖：
+2. 创建 `.env` 并填写上面的环境变量。
+
+3. 安装依赖：
 
 ```powershell
 npm install
 ```
 
-如果 Windows 上遇到 npm 默认缓存目录权限问题，可以把缓存放到项目目录：
+如果遇到 npm 缓存目录权限问题：
 
 ```powershell
 npm install --cache .\.npm-cache
 ```
 
-3. 启动开发服务：
-
-```powershell
-npm run dev -- --hostname 127.0.0.1 --port 3000
-```
-
-4. 打开浏览器访问：
-
-```text
-http://127.0.0.1:3000
-```
-
-## 生产部署
-
-1. 安装依赖：
-
-```powershell
-npm install
-```
-
-2. 构建项目：
+4. 构建生产版本：
 
 ```powershell
 npm run build
 ```
 
-3. 启动生产服务：
+5. 启动生产服务：
 
 ```powershell
 npm run start -- --hostname 127.0.0.1 --port 3000
 ```
 
-如果需要局域网内其他设备访问，把 hostname 改成 `0.0.0.0`：
+局域网访问可改为：
 
 ```powershell
 npm run start -- --hostname 0.0.0.0 --port 3000
 ```
 
-然后访问服务器 IP：
+访问：
+
+```text
+http://127.0.0.1:3000
+```
+
+Windows 后台运行示例：
+
+```powershell
+Start-Process powershell -WindowStyle Hidden -ArgumentList '-NoExit','-Command','cd "C:\path\to\Price-visualization"; npm run start -- --hostname 0.0.0.0 --port 3000'
+```
+
+## Linux 部署流程
+
+1. 安装 Node.js 20+、Git 和构建依赖。Ubuntu/Debian 示例：
+
+```bash
+sudo apt update
+sudo apt install -y git curl build-essential python3
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt install -y nodejs
+node --version
+npm --version
+```
+
+2. 克隆仓库：
+
+```bash
+git clone https://github.com/lin04-24/Price-visualization.git
+cd Price-visualization
+```
+
+3. 创建 `.env`：
+
+```bash
+nano .env
+```
+
+写入 `CSQAQ_API_TOKEN`、`SEND_MAIL`、`SEND_KEY`、`ACCEPT_MAIL`、`SEND_PORT`。
+
+4. 安装依赖并构建：
+
+```bash
+npm install
+npm run build
+```
+
+5. 启动生产服务：
+
+```bash
+npm run start -- --hostname 0.0.0.0 --port 3000
+```
+
+访问：
 
 ```text
 http://服务器IP:3000
 ```
 
-## Windows 后台运行示例
+如使用云服务器，请确认安全组/防火墙已放行 3000 端口，或使用 Nginx 反向代理到 127.0.0.1:3000。
 
-开发环境可以打开一个独立 PowerShell 窗口保持服务运行：
+## Linux 持久化后台运行方案
 
-```powershell
-Start-Process powershell -ArgumentList '-NoExit','-Command','cd "F:\1\cs"; npm run dev -- --hostname 127.0.0.1 --port 3000'
+### systemd（推荐）
+
+创建服务文件：
+
+```bash
+sudo nano /etc/systemd/system/price-visualization.service
 ```
 
-生产环境建议使用系统服务、计划任务或进程管理工具托管。最小命令如下：
+写入并按实际路径修改 `WorkingDirectory`：
+
+```ini
+[Unit]
+Description=Price Visualization Next.js Service
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/Price-visualization
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/npm run start -- --hostname 0.0.0.0 --port 3000
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+启用并启动：
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable price-visualization
+sudo systemctl start price-visualization
+sudo systemctl status price-visualization
+```
+
+查看日志：
+
+```bash
+journalctl -u price-visualization -f
+```
+
+### PM2
+
+```bash
+sudo npm install -g pm2
+pm2 start npm --name price-visualization -- run start -- --hostname 0.0.0.0 --port 3000
+pm2 save
+pm2 startup
+```
+
+查看日志：
+
+```bash
+pm2 logs price-visualization
+```
+
+### nohup（临时方案）
+
+```bash
+nohup npm run start -- --hostname 0.0.0.0 --port 3000 > app.log 2>&1 &
+```
+
+查看进程：
+
+```bash
+ps aux | grep 'next start'
+```
+
+## 自动监控与邮件提醒
+
+服务启动后会注册后台任务，每 30 分钟自动执行一次批量查询。自动执行阶段若价格超出用户设置的上下限，会发送邮件提醒，邮件包含：
+
+```text
+中文名
+ID
+英文名
+网易BUFF、悠悠有品、Steam 市场价格
+触发提醒的具体原因
+```
+
+手动发送邮箱测试邮件：
+
+```bash
+curl -X POST http://127.0.0.1:3000/api/email/test
+```
+
+Windows PowerShell：
 
 ```powershell
-npm run build
-npm run start -- --hostname 127.0.0.1 --port 3000
+Invoke-WebRequest -Method POST http://127.0.0.1:3000/api/email/test
 ```
 
 ## 数据与迁移
@@ -148,11 +277,9 @@ data/cases_state.json
 
 并迁移到 SQLite。迁移完成后会在 `app_meta` 表写入 `json_migrated_at`，避免重复导入。
 
-如果想重新从 JSON 初始化一份本地数据，可以停止服务后删除 `data/app.db`，再重新启动服务。
+如果想重新从 JSON 初始化本地数据，可以停止服务后删除 `data/app.db`，再重新启动服务。
 
 ## API
-
-页面使用以下本地接口：
 
 ```text
 GET    /api/settings
@@ -165,58 +292,49 @@ POST   /api/scrape
 POST   /api/cases/[caseId]
 DELETE /api/cases/[caseId]
 POST   /api/cases/[caseId]/cooldown/reset
+POST   /api/cases/[caseId]/market-snapshot
 GET    /api/csqaq/containers
 POST   /api/csqaq/containers
 GET    /api/csqaq/containers/lookup?name=...
 GET    /api/csqaq/containers/[containerId]/items
 GET    /api/csqaq/goods/lookup?name=...
 GET    /api/csqaq/goods/[goodId]
+POST   /api/csqaq/goods/prices/batch
+POST   /api/email/test
 ```
 
 ## 验证命令
 
-类型检查：
-
-```powershell
+```bash
 npm run typecheck
-```
-
-生产构建：
-
-```powershell
 npm run build
 ```
 
-接口验证示例：
+接口验证：
 
-```powershell
-Invoke-WebRequest -UseBasicParsing http://127.0.0.1:3000/api/settings
-Invoke-WebRequest -UseBasicParsing http://127.0.0.1:3000/api/uptime
+```bash
+curl http://127.0.0.1:3000/api/settings
+curl -X POST http://127.0.0.1:3000/api/email/test
 ```
 
 ## 常见问题
 
-### npm install 提示 npm-cache 权限不足
+### CSQAQ 返回 429
 
-使用项目内缓存目录：
+这是 CSQAQ 平台频率限制。项目会自动排队、缓存并重试请求；如果仍然返回 429，说明当前 Token 或 IP 仍处在平台限流窗口中，稍后重试即可。
 
-```powershell
-npm install --cache .\.npm-cache
-```
+### 收不到 QQ 邮件
+
+确认 QQ 邮箱已开启 SMTP 服务，`SEND_KEY` 使用的是 SMTP 授权码，不是登录密码。常用 `SEND_PORT` 为 `465`。
 
 ### 端口 3000 被占用
 
 换一个端口启动：
 
-```powershell
-npm run dev -- --hostname 127.0.0.1 --port 3001
+```bash
+npm run start -- --hostname 0.0.0.0 --port 3001
 ```
-
-### CSQAQ 返回 429
-
-这是 CSQAQ 平台的频率限制。项目会自动排队、缓存并重试请求；如果仍然返回 429，说明当前 Token 或 IP 仍处在平台限流窗口中，稍后重试即可。已保存的数字 good_id 会直接查询详情，不会重复做名称匹配，能减少连续请求。
 
 ### 数据没有按预期迁移
 
 确认 `data/app.db` 是否已经存在。系统只会在首次创建数据库时从 JSON 导入。需要重新导入时，停止服务，删除 `data/app.db`，再重新启动服务。
-

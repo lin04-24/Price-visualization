@@ -405,6 +405,12 @@ body[data-theme="dark"] .ico-moon {
   background: var(--tg-warning);
 }
 
+.btn-quiet {
+  background: var(--switch-bg);
+  border: 1px solid var(--tg-line);
+  color: var(--tg-text);
+}
+
 .btn-small {
   font-size: 13px;
   min-height: 34px;
@@ -691,6 +697,59 @@ body[data-theme="dark"] .case-market-snapshot {
 .modal-actions {
   justify-content: flex-end;
   margin-top: 18px;
+}
+
+.app-dialog-content {
+  max-width: 460px;
+  padding: 20px;
+}
+
+.app-dialog-body {
+  align-items: flex-start;
+  display: flex;
+  gap: 14px;
+}
+
+.app-dialog-icon {
+  align-items: center;
+  background: rgba(42, 171, 238, 0.12);
+  border-radius: 8px;
+  color: var(--tg-blue);
+  display: flex;
+  flex: 0 0 auto;
+  height: 42px;
+  justify-content: center;
+  width: 42px;
+}
+
+.app-dialog-warning .app-dialog-icon {
+  background: rgba(244, 166, 42, 0.14);
+  color: var(--tg-warning);
+}
+
+.app-dialog-danger .app-dialog-icon {
+  background: rgba(223, 63, 64, 0.14);
+  color: var(--tg-danger);
+}
+
+.app-dialog-icon svg {
+  height: 20px;
+  width: 20px;
+}
+
+.app-dialog-body h2 {
+  font-size: 19px;
+  line-height: 1.35;
+}
+
+.app-dialog-body p {
+  color: var(--tg-muted);
+  line-height: 1.6;
+  margin-top: 7px;
+}
+
+.app-dialog-actions {
+  margin-top: 20px;
 }
 
 .tab-bar {

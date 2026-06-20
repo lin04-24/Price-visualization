@@ -1,6 +1,6 @@
 "use client";
 
-import { Box, Loader2, Moon, Search, SlidersHorizontal, Sun, X, Zap } from "lucide-react";
+import { AlertTriangle, Box, Loader2, Moon, Search, SlidersHorizontal, Sun, X, Zap } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { DEFAULT_SETTINGS } from "@/lib/defaults";
 import type {
@@ -60,6 +60,15 @@ type BatchPriceState = {
   items: CsqaqGoodDetail[];
   loading: boolean;
   error: string | null;
+};
+
+type AppDialogState = {
+  title: string;
+  message: string;
+  confirmLabel: string;
+  cancelLabel?: string;
+  variant?: "info" | "warning" | "danger";
+  onConfirm?: () => void | Promise<void>;
 };
 
 function formatDuration(seconds: number) {
@@ -188,6 +197,7 @@ export function ConfigDashboard() {
   const [showContainerSuggestions, setShowContainerSuggestions] = useState(false);
   const [caseDetail, setCaseDetail] = useState<CaseDetailState | null>(null);
   const [batchPrices, setBatchPrices] = useState<BatchPriceState | null>(null);
+  const [appDialog, setAppDialog] = useState<AppDialogState | null>(null);
 
   const uptime = useMemo(
     () => formatUptime(serverStartTime),
@@ -196,6 +206,22 @@ export function ConfigDashboard() {
 
   function showToast(message: string, type: ToastState["type"] = "success") {
     setToast({ message, type });
+  }
+
+  function openAppDialog(dialog: AppDialogState) {
+    setAppDialog(dialog);
+  }
+
+  async function confirmAppDialog() {
+    const action = appDialog?.onConfirm;
+    setAppDialog(null);
+    if (!action) return;
+
+    try {
+      await action();
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "操作失败", "error");
+    }
   }
 
   async function loadSettings() {
@@ -301,24 +327,40 @@ export function ConfigDashboard() {
     }
   }
 
-  async function resetAllCooldown() {
-    if (!window.confirm("确定要重置所有箱子的冷却期吗？")) return;
-    const data = await postJson("/api/cooldown/reset");
-    if (data.success) {
-      showToast("已重置所有冷却期");
-    } else {
-      showToast(`重置失败: ${data.message || "未知错误"}`, "error");
-    }
+  function resetAllCooldown() {
+    openAppDialog({
+      title: "重置所有冷却",
+      message: "确定要重置所有箱子的冷却期吗？此操作会清空当前冷却状态。",
+      confirmLabel: "重置",
+      cancelLabel: "取消",
+      variant: "warning",
+      onConfirm: async () => {
+        const data = await postJson("/api/cooldown/reset");
+        if (data.success) {
+          showToast("已重置所有冷却期");
+        } else {
+          showToast(`重置失败: ${data.message || "未知错误"}`, "error");
+        }
+      },
+    });
   }
 
-  async function resetCaseCooldown(caseId: string) {
-    if (!window.confirm(`确定要重置 ${caseId} 的冷却期吗？`)) return;
-    const data = await postJson(`/api/cases/${encodeURIComponent(caseId)}/cooldown/reset`);
-    if (data.success) {
-      showToast(data.message || "已重置冷却期");
-    } else {
-      showToast(`重置失败: ${data.message || "未知错误"}`, "error");
-    }
+  function resetCaseCooldown(caseId: string) {
+    openAppDialog({
+      title: "重置冷却期",
+      message: `确定要重置 ${caseId} 的冷却期吗？`,
+      confirmLabel: "重置",
+      cancelLabel: "取消",
+      variant: "warning",
+      onConfirm: async () => {
+        const data = await postJson(`/api/cases/${encodeURIComponent(caseId)}/cooldown/reset`);
+        if (data.success) {
+          showToast(data.message || "已重置冷却期");
+        } else {
+          showToast(`重置失败: ${data.message || "未知错误"}`, "error");
+        }
+      },
+    });
   }
 
   function openAddCaseModal() {
@@ -404,7 +446,12 @@ export function ConfigDashboard() {
   async function queryConfiguredCasePrices() {
     const configuredCount = Object.keys(settings.cases).length;
     if (configuredCount > 50) {
-      window.alert(`已配置 ${configuredCount} 个饰品，批量查询最多支持 50 个`);
+      openAppDialog({
+        title: "无法批量查询",
+        message: `已配置 ${configuredCount} 个饰品，批量查询最多支持 50 个。`,
+        confirmLabel: "知道了",
+        variant: "info",
+      });
       return;
     }
 
@@ -527,18 +574,26 @@ export function ConfigDashboard() {
     }
   }
 
-  async function deleteCaseById(id: string) {
-    if (!window.confirm(`确定要删除 ${id} 的配置吗？`)) return;
-    const response = await fetch(`/api/cases/${encodeURIComponent(id)}`, {
-      method: "DELETE",
+  function deleteCaseById(id: string) {
+    openAppDialog({
+      title: "删除配置",
+      message: `确定要删除 ${id} 的配置吗？删除后该饰品的冷却状态和行情快照也会一并清理。`,
+      confirmLabel: "删除",
+      cancelLabel: "取消",
+      variant: "danger",
+      onConfirm: async () => {
+        const response = await fetch(`/api/cases/${encodeURIComponent(id)}`, {
+          method: "DELETE",
+        });
+        const data = (await response.json()) as ApiResult;
+        if (data.success) {
+          showToast(data.message || "配置已删除");
+          await loadSettings();
+        } else {
+          showToast(`删除失败: ${data.message || "未知错误"}`, "error");
+        }
+      },
     });
-    const data = (await response.json()) as ApiResult;
-    if (data.success) {
-      showToast(data.message || "配置已删除");
-      await loadSettings();
-    } else {
-      showToast(`删除失败: ${data.message || "未知错误"}`, "error");
-    }
   }
 
   function updateSwitches(updater: (current: SwitchesConfig) => SwitchesConfig) {
@@ -998,6 +1053,47 @@ export function ConfigDashboard() {
       </div>
 
       <div
+        className={`modal ${appDialog ? "show" : ""}`}
+        onMouseDown={(event) => {
+          if (event.target === event.currentTarget) {
+            setAppDialog(null);
+          }
+        }}
+      >
+        <div className={`modal-content app-dialog-content app-dialog-${appDialog?.variant ?? "info"}`}>
+          <div className="app-dialog-body">
+            <div className="app-dialog-icon">
+              <AlertTriangle aria-hidden="true" />
+            </div>
+            <div>
+              <h2>{appDialog?.title}</h2>
+              <p>{appDialog?.message}</p>
+            </div>
+          </div>
+          <div className="modal-actions app-dialog-actions">
+            {appDialog?.cancelLabel ? (
+              <button className="btn btn-primary btn-quiet" type="button" onClick={() => setAppDialog(null)}>
+                {appDialog.cancelLabel}
+              </button>
+            ) : null}
+            <button
+              className={`btn ${
+                appDialog?.variant === "danger"
+                  ? "btn-danger"
+                  : appDialog?.variant === "warning"
+                    ? "btn-warning"
+                    : "btn-primary"
+              }`}
+              type="button"
+              onClick={() => void confirmAppDialog()}
+            >
+              {appDialog?.confirmLabel}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div
         className={`modal ${isModalOpen ? "show" : ""}`}
         onMouseDown={(event) => {
           if (event.target === event.currentTarget) {
@@ -1435,4 +1531,5 @@ function TextField({
     </div>
   );
 }
+
 
