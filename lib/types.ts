@@ -131,4 +131,5 @@ export interface CsqaqGoodDetailResult extends ApiResult {
 export interface CsqaqGoodBatchPriceResult extends ApiResult {
   count?: number;
   items?: CsqaqGoodDetail[];
+  case_market_snapshots?: Record<string, CaseMarketSnapshot>;
 }

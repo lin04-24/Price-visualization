@@ -1,7 +1,7 @@
-﻿import { getGoodBatchPrices, getCsqaqErrorStatus, lookupGoodByName } from "@/lib/csqaq";
-import { getSettings } from "@/lib/db";
+import { getGoodBatchPrices, getCsqaqErrorStatus, lookupGoodByName } from "@/lib/csqaq";
+import { getSettings, saveCaseMarketSnapshot } from "@/lib/db";
 import { errorResponse, jsonResponse } from "@/lib/http";
-import type { CaseConfig, CsqaqGoodDetail } from "@/lib/types";
+import type { CaseConfig, CaseMarketSnapshot, CsqaqGoodDetail } from "@/lib/types";
 
 export const runtime = "nodejs";
 
@@ -83,7 +83,26 @@ export async function POST() {
       return price ? { ...price, id: item.id, name: price.name || item.config.name || item.id } : makeErrorItem(item, "批量价格接口未返回该饰品");
     });
 
-    return jsonResponse({ success: true, count: items.length, items });
+    const caseMarketSnapshots: Record<string, CaseMarketSnapshot> = {};
+    await Promise.all(
+      items.map(async (item) => {
+        if (item.error) {
+          return;
+        }
+
+        caseMarketSnapshots[item.id] = await saveCaseMarketSnapshot(item.id, {
+          steam_sell_price: item.steam_sell_price,
+          yyyp_sell_price: item.yyyp_sell_price,
+        });
+      }),
+    );
+
+    return jsonResponse({
+      success: true,
+      count: items.length,
+      items,
+      case_market_snapshots: caseMarketSnapshots,
+    });
   } catch (error) {
     return errorResponse(error instanceof Error ? error.message : "批量查询失败", getCsqaqErrorStatus(error));
   }

@@ -417,6 +417,12 @@ export function ConfigDashboard() {
       }
 
       setBatchPrices({ items: data.items ?? [], loading: false, error: null });
+      if (data.case_market_snapshots) {
+        setCaseMarketSnapshots((current) => ({
+          ...current,
+          ...data.case_market_snapshots,
+        }));
+      }
       showToast(`已批量查询 ${data.count ?? data.items?.length ?? 0} 个饰品`);
     } catch (error) {
       setBatchPrices({
