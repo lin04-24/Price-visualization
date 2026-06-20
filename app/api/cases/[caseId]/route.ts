@@ -14,7 +14,7 @@ export async function POST(request: Request, context: RouteContext) {
   const { caseId } = await context.params;
   const decodedCaseId = decodeURIComponent(caseId);
   try {
-    saveCase(decodedCaseId, await readJson<CaseConfig>(request));
+    await saveCase(decodedCaseId, await readJson<CaseConfig>(request));
     return jsonResponse({ success: true, message: `已保存 ${decodedCaseId} 的配置` });
   } catch (error) {
     return errorResponse(error instanceof Error ? error.message : "保存失败");
@@ -24,7 +24,7 @@ export async function POST(request: Request, context: RouteContext) {
 export async function DELETE(_request: Request, context: RouteContext) {
   const { caseId } = await context.params;
   const decodedCaseId = decodeURIComponent(caseId);
-  if (!deleteCase(decodedCaseId)) {
+  if (!(await deleteCase(decodedCaseId))) {
     return jsonResponse({ success: false, message: "配置不存在" }, 404);
   }
 

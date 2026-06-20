@@ -9,6 +9,11 @@ const CSQAQ_BASE_URL = "https://api.csqaq.com/api/v1";
 const CONTAINER_CACHE_MS = 1000 * 60 * 30;
 const CONTAINER_SYNC_INTERVAL_MS = 1000 * 60 * 60 * 24;
 const CONTAINER_SYNC_CHECK_MS = 1000 * 60 * 60;
+const CSQAQ_MIN_REQUEST_INTERVAL_MS = 1200;
+const CSQAQ_MAX_RETRIES = 3;
+const CSQAQ_RETRY_BASE_MS = 1500;
+const GOOD_LOOKUP_CACHE_MS = 1000 * 60 * 10;
+const GOOD_DETAIL_CACHE_MS = 1000 * 60 * 5;
 
 type CsqaqEnvelope<T> = {
   code: number;
@@ -70,6 +75,24 @@ type RawGoodDetail = {
 let containersCache: { expiresAt: number; promise: Promise<CsqaqContainer[]> } | null = null;
 let containerSyncPromise: Promise<CsqaqContainer[]> | null = null;
 let backgroundSyncStarted = false;
+let csqaqRequestQueue = Promise.resolve();
+let nextCsqaqRequestAt = 0;
+const goodLookupCache = new Map<string, { expiresAt: number; promise: Promise<RawGoodIdResponse> }>();
+const goodDetailCache = new Map<string, { expiresAt: number; promise: Promise<RawGoodDetail> }>();
+
+export class CsqaqRequestError extends Error {
+  constructor(
+    message: string,
+    public readonly status: number,
+  ) {
+    super(message);
+    this.name = "CsqaqRequestError";
+  }
+}
+
+export function getCsqaqErrorStatus(error: unknown) {
+  return error instanceof CsqaqRequestError ? error.status : 502;
+}
 
 function getApiToken() {
   const token = process.env.CSQAQ_API_TOKEN?.trim();
@@ -77,6 +100,44 @@ function getApiToken() {
     throw new Error("缺少 CSQAQ_API_TOKEN 环境变量");
   }
   return token;
+}
+
+function sleep(ms: number) {
+  return new Promise<void>((resolve) => setTimeout(resolve, ms));
+}
+
+function getRetryAfterMs(response: Response) {
+  const retryAfter = response.headers.get("retry-after");
+  if (!retryAfter) return null;
+
+  const retryAfterSeconds = Number(retryAfter);
+  if (Number.isFinite(retryAfterSeconds)) {
+    return Math.max(retryAfterSeconds * 1000, 0);
+  }
+
+  const retryAt = Date.parse(retryAfter);
+  return Number.isFinite(retryAt) ? Math.max(retryAt - Date.now(), 0) : null;
+}
+
+function enqueueCsqaqRequest<T>(request: () => Promise<T>) {
+  const queued = csqaqRequestQueue.then(async () => {
+    const waitMs = Math.max(nextCsqaqRequestAt - Date.now(), 0);
+    if (waitMs > 0) {
+      await sleep(waitMs);
+    }
+
+    try {
+      return await request();
+    } finally {
+      nextCsqaqRequestAt = Date.now() + CSQAQ_MIN_REQUEST_INTERVAL_MS;
+    }
+  });
+
+  csqaqRequestQueue = queued.then(
+    () => undefined,
+    () => undefined,
+  );
+  return queued;
 }
 
 function toNumber(value: unknown): number | null {
@@ -125,59 +186,85 @@ function scoreName(primaryName: string, query: string, secondaryName = "") {
   return 0;
 }
 
-function shouldRefreshContainers() {
-  const syncedAt = getCsqaqContainersSyncedAt();
+async function shouldRefreshContainers() {
+  const syncedAt = await getCsqaqContainersSyncedAt();
   if (!syncedAt) return true;
   const syncedTime = new Date(syncedAt).getTime();
   return !Number.isFinite(syncedTime) || Date.now() - syncedTime >= CONTAINER_SYNC_INTERVAL_MS;
 }
 
 async function csqaqRequest<T>(path: string, init: RequestInit = {}) {
-  const response = await fetch(`${CSQAQ_BASE_URL}${path}`, {
-    ...init,
-    cache: "no-store",
-    headers: {
-      Accept: "application/json",
-      ApiToken: getApiToken(),
-      ...init.headers,
-    },
+  return enqueueCsqaqRequest(async () => {
+    let lastError: unknown;
+
+    for (let attempt = 0; attempt <= CSQAQ_MAX_RETRIES; attempt += 1) {
+      const response = await fetch(`${CSQAQ_BASE_URL}${path}`, {
+        ...init,
+        cache: "no-store",
+        headers: {
+          Accept: "application/json",
+          ApiToken: getApiToken(),
+          ...init.headers,
+        },
+      });
+
+      if (response.status === 429) {
+        lastError = new CsqaqRequestError("CSQAQ 请求过于频繁，请稍后再试", 429);
+        if (attempt < CSQAQ_MAX_RETRIES) {
+          const retryAfterMs = getRetryAfterMs(response);
+          await sleep(retryAfterMs ?? CSQAQ_RETRY_BASE_MS * (attempt + 1));
+          continue;
+        }
+        throw lastError;
+      }
+
+      if (!response.ok) {
+        throw new CsqaqRequestError(`CSQAQ 请求失败: HTTP ${response.status}`, response.status);
+      }
+
+      const payload = JSON.parse(new TextDecoder("utf-8").decode(await response.arrayBuffer())) as CsqaqEnvelope<T>;
+      if (payload.code !== 200) {
+        throw new CsqaqRequestError(payload.msg || `CSQAQ 返回异常状态: ${payload.code}`, 502);
+      }
+
+      return payload.data;
+    }
+
+    throw lastError ?? new CsqaqRequestError("CSQAQ 请求失败", 502);
   });
-
-  if (!response.ok) {
-    throw new Error(`CSQAQ 请求失败: HTTP ${response.status}`);
-  }
-
-  const payload = JSON.parse(new TextDecoder("utf-8").decode(await response.arrayBuffer())) as CsqaqEnvelope<T>;
-  if (payload.code !== 200) {
-    throw new Error(payload.msg || `CSQAQ 返回异常状态: ${payload.code}`);
-  }
-
-  return payload.data;
 }
 
 async function fetchContainersFromCsqaq() {
   const now = Date.now();
   if (!containersCache || containersCache.expiresAt <= now) {
+    const promise = csqaqRequest<RawContainer[]>("/info/container_data_info", { method: "POST" }).then(
+      (containers) => containers.map(toContainer),
+    );
+
     containersCache = {
       expiresAt: now + CONTAINER_CACHE_MS,
-      promise: csqaqRequest<RawContainer[]>("/info/container_data_info", { method: "POST" }).then(
-        (containers) => containers.map(toContainer),
-      ),
+      promise,
     };
+
+    promise.catch(() => {
+      if (containersCache?.promise === promise) {
+        containersCache = null;
+      }
+    });
   }
 
   return containersCache.promise;
 }
 
 export async function syncContainersFromCsqaq(force = false) {
-  if (!force && !shouldRefreshContainers()) {
+  if (!force && !(await shouldRefreshContainers())) {
     return getStoredCsqaqContainers();
   }
 
   if (!containerSyncPromise) {
     containerSyncPromise = fetchContainersFromCsqaq()
-      .then((containers) => {
-        saveCsqaqContainers(containers);
+      .then(async (containers) => {
+        await saveCsqaqContainers(containers);
         return containers;
       })
       .finally(() => {
@@ -199,9 +286,9 @@ export function startContainerAutoSync() {
 }
 
 export async function getContainers() {
-  const stored = getStoredCsqaqContainers();
+  const stored = await getStoredCsqaqContainers();
   if (stored.length > 0) {
-    if (shouldRefreshContainers()) {
+    if (await shouldRefreshContainers()) {
       void syncContainersFromCsqaq().catch(() => undefined);
     }
     return stored;
@@ -211,13 +298,13 @@ export async function getContainers() {
 }
 
 export async function getContainerSyncStatus() {
-  if (shouldRefreshContainers()) {
+  if (await shouldRefreshContainers()) {
     await syncContainersFromCsqaq();
   }
 
   return {
-    synced_at: getCsqaqContainersSyncedAt(),
-    count: getStoredCsqaqContainers().length,
+    synced_at: await getCsqaqContainersSyncedAt(),
+    count: (await getStoredCsqaqContainers()).length,
   };
 }
 
@@ -240,12 +327,19 @@ export async function lookupContainerByName(name: string, limit = 8) {
   return {
     container: matches[0],
     matches,
-    synced_at: getCsqaqContainersSyncedAt(),
+    synced_at: await getCsqaqContainersSyncedAt(),
   };
 }
 
 export async function lookupGoodByName(name: string) {
-  const result = await csqaqRequest<RawGoodIdResponse>("/info/get_good_id", {
+  const cacheKey = normalizeName(name);
+  const now = Date.now();
+  const cached = goodLookupCache.get(cacheKey);
+  if (cached && cached.expiresAt > now) {
+    return rankGoodMatches(await cached.promise, name);
+  }
+
+  const promise = csqaqRequest<RawGoodIdResponse>("/info/get_good_id", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -257,6 +351,22 @@ export async function lookupGoodByName(name: string) {
     }),
   });
 
+  goodLookupCache.set(cacheKey, {
+    expiresAt: now + GOOD_LOOKUP_CACHE_MS,
+    promise,
+  });
+
+  try {
+    return rankGoodMatches(await promise, name);
+  } catch (error) {
+    if (goodLookupCache.get(cacheKey)?.promise === promise) {
+      goodLookupCache.delete(cacheKey);
+    }
+    throw error;
+  }
+}
+
+function rankGoodMatches(result: RawGoodIdResponse, name: string) {
   const goods = Object.values(result.data ?? {}).map(toGoodSummary);
   const rankedMatches = goods
     .map((good, index) => ({
@@ -280,8 +390,28 @@ async function getContainerItems(containerId: string | number) {
 }
 
 async function getGoodDetail(goodId: string | number) {
-  const id = encodeURIComponent(String(goodId));
-  return csqaqRequest<RawGoodDetail>(`/info/good?id=${id}`);
+  const cacheKey = String(goodId);
+  const now = Date.now();
+  const cached = goodDetailCache.get(cacheKey);
+  if (cached && cached.expiresAt > now) {
+    return cached.promise;
+  }
+
+  const id = encodeURIComponent(cacheKey);
+  const promise = csqaqRequest<RawGoodDetail>(`/info/good?id=${id}`);
+  goodDetailCache.set(cacheKey, {
+    expiresAt: now + GOOD_DETAIL_CACHE_MS,
+    promise,
+  });
+
+  try {
+    return await promise;
+  } catch (error) {
+    if (goodDetailCache.get(cacheKey)?.promise === promise) {
+      goodDetailCache.delete(cacheKey);
+    }
+    throw error;
+  }
 }
 
 function normalizeGoodDetail(detail: RawGoodDetail, fallback?: RawContainerItem | CsqaqGoodSummary): CsqaqGoodDetail {

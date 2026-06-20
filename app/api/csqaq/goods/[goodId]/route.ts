@@ -1,4 +1,4 @@
-import { getGoodMarketDetail } from "@/lib/csqaq";
+import { getGoodMarketDetail, getCsqaqErrorStatus } from "@/lib/csqaq";
 import { errorResponse, jsonResponse } from "@/lib/http";
 
 export const runtime = "nodejs";
@@ -21,6 +21,6 @@ export async function GET(_request: Request, context: RouteContext) {
     const item = await getGoodMarketDetail(decodedGoodId);
     return jsonResponse({ success: true, item });
   } catch (error) {
-    return errorResponse(error instanceof Error ? error.message : "饰品详情查询失败", 502);
+    return errorResponse(error instanceof Error ? error.message : "饰品详情查询失败", getCsqaqErrorStatus(error));
   }
 }

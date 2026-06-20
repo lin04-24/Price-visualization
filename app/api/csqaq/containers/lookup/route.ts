@@ -1,4 +1,4 @@
-import { lookupContainerByName } from "@/lib/csqaq";
+import { getCsqaqErrorStatus, lookupContainerByName } from "@/lib/csqaq";
 import { errorResponse, jsonResponse } from "@/lib/http";
 
 export const runtime = "nodejs";
@@ -19,6 +19,6 @@ export async function GET(request: Request) {
 
     return jsonResponse({ success: true, ...result });
   } catch (error) {
-    return errorResponse(error instanceof Error ? error.message : "查询失败", 502);
+    return errorResponse(error instanceof Error ? error.message : "查询失败", getCsqaqErrorStatus(error));
   }
 }

@@ -4,7 +4,7 @@ import { jsonResponse } from "@/lib/http";
 
 export const runtime = "nodejs";
 
-export function GET() {
+export async function GET() {
   startContainerAutoSync();
-  return jsonResponse(getSettings());
+  return jsonResponse(await getSettings());
 }

@@ -383,23 +383,19 @@ export function ConfigDashboard() {
 
     try {
       const numericCaseId = /^\d+$/.test(caseId) ? caseId : "";
-      let goodId = "";
+      let goodId = numericCaseId;
       const nameForLookup = caseData.name.trim();
 
-      if (nameForLookup) {
+      if (!goodId && nameForLookup) {
         const lookupResponse = await fetch(
           `/api/csqaq/goods/lookup?name=${encodeURIComponent(nameForLookup)}`,
         );
         const lookupData = (await lookupResponse.json()) as CsqaqGoodLookupResult;
         if (lookupResponse.ok && lookupData.success && lookupData.good) {
           goodId = String(lookupData.good.id);
-        } else if (!numericCaseId) {
+        } else {
           throw new Error(lookupData.message || "无法匹配饰品 good_id");
         }
-      }
-
-      if (!goodId) {
-        goodId = numericCaseId;
       }
 
       if (!goodId) {

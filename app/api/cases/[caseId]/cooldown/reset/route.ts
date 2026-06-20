@@ -12,7 +12,7 @@ interface RouteContext {
 export async function POST(_request: Request, context: RouteContext) {
   const { caseId } = await context.params;
   const decodedCaseId = decodeURIComponent(caseId);
-  if (!resetCaseCooldown(decodedCaseId)) {
+  if (!(await resetCaseCooldown(decodedCaseId))) {
     return jsonResponse({ success: false, message: "箱子不存在" }, 404);
   }
 

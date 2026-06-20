@@ -1,4 +1,4 @@
-import { findContainerById, getContainerMarketItems } from "@/lib/csqaq";
+import { findContainerById, getContainerMarketItems, getCsqaqErrorStatus } from "@/lib/csqaq";
 import { errorResponse, jsonResponse } from "@/lib/http";
 
 export const runtime = "nodejs";
@@ -31,6 +31,6 @@ export async function GET(request: Request, context: RouteContext) {
 
     return jsonResponse({ success: true, container, items, limit });
   } catch (error) {
-    return errorResponse(error instanceof Error ? error.message : "详情查询失败", 502);
+    return errorResponse(error instanceof Error ? error.message : "详情查询失败", getCsqaqErrorStatus(error));
   }
 }

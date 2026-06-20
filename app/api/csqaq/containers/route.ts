@@ -1,4 +1,4 @@
-import { getContainerSyncStatus, lookupContainerByName, syncContainersFromCsqaq } from "@/lib/csqaq";
+import { getContainerSyncStatus, getCsqaqErrorStatus, lookupContainerByName, syncContainersFromCsqaq } from "@/lib/csqaq";
 import { errorResponse, jsonResponse } from "@/lib/http";
 
 export const runtime = "nodejs";
@@ -25,7 +25,7 @@ export async function GET(request: Request) {
     const result = await lookupContainerByName(query, limit);
     return jsonResponse({ success: true, ...result });
   } catch (error) {
-    return errorResponse(error instanceof Error ? error.message : "收藏品查询失败", 502);
+    return errorResponse(error instanceof Error ? error.message : "收藏品查询失败", getCsqaqErrorStatus(error));
   }
 }
 
@@ -38,6 +38,6 @@ export async function POST() {
       synced_at: new Date().toISOString(),
     });
   } catch (error) {
-    return errorResponse(error instanceof Error ? error.message : "收藏品同步失败", 502);
+    return errorResponse(error instanceof Error ? error.message : "收藏品同步失败", getCsqaqErrorStatus(error));
   }
 }

@@ -3,6 +3,6 @@ import { jsonResponse } from "@/lib/http";
 
 export const runtime = "nodejs";
 
-export function GET() {
-  return jsonResponse(getCasesState());
+export async function GET() {
+  return jsonResponse(await getCasesState());
 }

@@ -1,7 +1,8 @@
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { DatabaseSync } from "node:sqlite";
+import * as sqlite3 from "sqlite3";
 import { DEFAULT_SETTINGS } from "./defaults";
+import type { Database, RunResult } from "sqlite3";
 import type {
   CaseConfig,
   CaseState,
@@ -12,13 +13,21 @@ import type {
   SwitchesConfig,
 } from "./types";
 
+type SqlParameter = string | number | null;
+
+interface RunInfo {
+  changes: number;
+  lastID: number;
+}
+
 const rootDir = process.cwd();
 const dataDir = path.join(rootDir, "data");
 const dbPath = path.join(dataDir, "app.db");
 const settingsJsonPath = path.join(dataDir, "settings.json");
 const stateJsonPath = path.join(dataDir, "cases_state.json");
 
-let db: DatabaseSync | null = null;
+let dbPromise: Promise<Database> | null = null;
+let dbQueue = Promise.resolve();
 
 function nowIso() {
   return new Date().toISOString();
@@ -34,6 +43,79 @@ function readJsonFile<T>(filePath: string, fallback: T): T {
   } catch {
     return fallback;
   }
+}
+
+function openDatabase(filePath: string) {
+  return new Promise<Database>((resolve, reject) => {
+    new sqlite3.Database(
+      filePath,
+      sqlite3.OPEN_READWRITE | sqlite3.OPEN_CREATE,
+      function onOpen(this: Database, error: Error | null) {
+        if (error) {
+          reject(error);
+          return;
+        }
+
+        this.configure("busyTimeout", 5000);
+        resolve(this);
+      },
+    );
+  });
+}
+
+function exec(database: Database, sql: string) {
+  return new Promise<void>((resolve, reject) => {
+    database.exec(sql, (error) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+
+      resolve();
+    });
+  });
+}
+
+function run(database: Database, sql: string, params: SqlParameter[] = []) {
+  return new Promise<RunInfo>((resolve, reject) => {
+    database.run(sql, params, function onRun(this: RunResult, error: Error | null) {
+      if (error) {
+        reject(error);
+        return;
+      }
+
+      resolve({
+        changes: this.changes ?? 0,
+        lastID: this.lastID ?? 0,
+      });
+    });
+  });
+}
+
+function get<T>(database: Database, sql: string, params: SqlParameter[] = []) {
+  return new Promise<T | undefined>((resolve, reject) => {
+    database.get<T>(sql, params, (error, row) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+
+      resolve(row);
+    });
+  });
+}
+
+function all<T>(database: Database, sql: string, params: SqlParameter[] = []) {
+  return new Promise<T[]>((resolve, reject) => {
+    database.all<T>(sql, params, (error, rows) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+
+      resolve(rows);
+    });
+  });
 }
 
 function normalizeScrape(scrape?: Partial<ScrapeConfig>): ScrapeConfig {
@@ -86,8 +168,10 @@ function normalizeCaseState(state?: Partial<CaseState>): CaseState {
   };
 }
 
-function initSchema(database: DatabaseSync) {
-  database.exec(`
+async function initSchema(database: Database) {
+  await exec(
+    database,
+    `
     CREATE TABLE IF NOT EXISTS settings_sections (
       section TEXT PRIMARY KEY,
       payload_json TEXT NOT NULL,
@@ -128,38 +212,34 @@ function initSchema(database: DatabaseSync) {
     );
 
     CREATE INDEX IF NOT EXISTS idx_csqaq_containers_name ON csqaq_containers(name);
-  `);
+  `,
+  );
 }
 
-function setMeta(database: DatabaseSync, key: string, value: string) {
-  database
-    .prepare("INSERT OR REPLACE INTO app_meta (key, value) VALUES (?, ?)")
-    .run(key, value);
+async function setMeta(database: Database, key: string, value: string) {
+  await run(database, "INSERT OR REPLACE INTO app_meta (key, value) VALUES (?, ?)", [key, value]);
 }
 
-function getMeta(database: DatabaseSync, key: string): string | null {
-  const row = database
-    .prepare("SELECT value FROM app_meta WHERE key = ?")
-    .get(key) as { value: string } | undefined;
+async function getMeta(database: Database, key: string): Promise<string | null> {
+  const row = await get<{ value: string }>(database, "SELECT value FROM app_meta WHERE key = ?", [key]);
   return row?.value ?? null;
 }
 
-function setSection<T>(database: DatabaseSync, section: string, payload: T) {
-  database
-    .prepare(
-      "INSERT OR REPLACE INTO settings_sections (section, payload_json, updated_at) VALUES (?, ?, ?)",
-    )
-    .run(section, JSON.stringify(payload), nowIso());
+async function setSection<T>(database: Database, section: string, payload: T) {
+  await run(
+    database,
+    "INSERT OR REPLACE INTO settings_sections (section, payload_json, updated_at) VALUES (?, ?, ?)",
+    [section, JSON.stringify(payload), nowIso()],
+  );
 }
 
-function upsertCase(database: DatabaseSync, id: string, caseConfig: CaseConfig) {
-  database
-    .prepare(
-      `INSERT OR REPLACE INTO cases
+async function upsertCase(database: Database, id: string, caseConfig: CaseConfig) {
+  await run(
+    database,
+    `INSERT OR REPLACE INTO cases
         (id, name, enabled, buff_uu_min, buff_uu_max, steam_min, steam_max, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    )
-    .run(
+    [
       id,
       caseConfig.name || id,
       caseConfig.enabled === false ? 0 : 1,
@@ -168,28 +248,45 @@ function upsertCase(database: DatabaseSync, id: string, caseConfig: CaseConfig) 
       Number(caseConfig.steam?.min_price ?? 0),
       Number(caseConfig.steam?.max_price ?? 999999),
       nowIso(),
-    );
+    ],
+  );
 }
 
-function ensureCaseState(database: DatabaseSync, caseId: string, state?: Partial<CaseState>) {
+async function ensureCaseState(
+  database: Database,
+  caseId: string,
+  state?: Partial<CaseState>,
+) {
   const normalized = normalizeCaseState(state);
-  database
-    .prepare(
-      `INSERT OR IGNORE INTO case_state
+  await run(
+    database,
+    `INSERT OR IGNORE INTO case_state
         (case_id, total_seconds, current_session_seconds, in_cooldown, remaining_days)
        VALUES (?, ?, ?, ?, ?)`,
-    )
-    .run(
+    [
       caseId,
       normalized.total_seconds,
       normalized.current_session_seconds,
       normalized.in_cooldown ? 1 : 0,
       normalized.remaining_days,
-    );
+    ],
+  );
 }
 
-function migrateJsonIfNeeded(database: DatabaseSync) {
-  if (getMeta(database, "json_migrated_at")) {
+async function transaction<T>(database: Database, action: () => Promise<T>) {
+  await exec(database, "BEGIN");
+  try {
+    const result = await action();
+    await exec(database, "COMMIT");
+    return result;
+  } catch (error) {
+    await exec(database, "ROLLBACK").catch(() => undefined);
+    throw error;
+  }
+}
+
+async function migrateJsonIfNeeded(database: Database) {
+  if (await getMeta(database, "json_migrated_at")) {
     return;
   }
 
@@ -197,50 +294,57 @@ function migrateJsonIfNeeded(database: DatabaseSync) {
   const jsonState = readJsonFile<Record<string, Partial<CaseState>>>(stateJsonPath, {});
   const settings = mergeSettings(DEFAULT_SETTINGS, jsonSettings);
 
-  database.exec("BEGIN");
-  try {
-    setSection(database, "switches", settings.switches);
-    setSection(database, "cooldown", settings.cooldown);
-    setSection(database, "scrape", settings.scrape);
+  await transaction(database, async () => {
+    await setSection(database, "switches", settings.switches);
+    await setSection(database, "cooldown", settings.cooldown);
+    await setSection(database, "scrape", settings.scrape);
     for (const [caseId, caseConfig] of Object.entries(settings.cases)) {
-      upsertCase(database, caseId, caseConfig);
-      ensureCaseState(database, caseId, jsonState[caseId]);
+      await upsertCase(database, caseId, caseConfig);
+      await ensureCaseState(database, caseId, jsonState[caseId]);
     }
-    setMeta(database, "json_migrated_at", nowIso());
-    setMeta(database, "start_time", nowIso());
-    database.exec("COMMIT");
-  } catch (error) {
-    database.exec("ROLLBACK");
-    throw error;
-  }
+    await setMeta(database, "json_migrated_at", nowIso());
+    await setMeta(database, "start_time", nowIso());
+  });
 }
 
-export function getDb() {
-  if (!db) {
+export async function getDb() {
+  if (!dbPromise) {
     mkdirSync(dataDir, { recursive: true });
-    db = new DatabaseSync(dbPath);
-    initSchema(db);
-    migrateJsonIfNeeded(db);
+    dbPromise = openDatabase(dbPath)
+      .then(async (database) => {
+        await initSchema(database);
+        await migrateJsonIfNeeded(database);
+        return database;
+      })
+      .catch((error) => {
+        dbPromise = null;
+        throw error;
+      });
   }
 
-  return db;
+  return dbPromise;
 }
 
-export function getSettings(): Settings {
-  const database = getDb();
-  const rows = database
-    .prepare("SELECT section, payload_json FROM settings_sections")
-    .all() as Array<{ section: string; payload_json: string }>;
+function withDb<T>(operation: (database: Database) => Promise<T>) {
+  const queuedOperation = dbQueue.then(async () => operation(await getDb()));
+  dbQueue = queuedOperation.then(
+    () => undefined,
+    () => undefined,
+  );
+  return queuedOperation;
+}
+
+async function getSettingsInternal(database: Database): Promise<Settings> {
+  const rows = await all<{ section: string; payload_json: string }>(
+    database,
+    "SELECT section, payload_json FROM settings_sections",
+  );
 
   const sections = Object.fromEntries(
     rows.map((row) => [row.section, JSON.parse(row.payload_json)]),
   ) as Partial<Pick<Settings, "switches" | "cooldown" | "scrape">>;
 
-  const caseRows = database
-    .prepare(
-      "SELECT id, name, enabled, buff_uu_min, buff_uu_max, steam_min, steam_max FROM cases ORDER BY id",
-    )
-    .all() as Array<{
+  const caseRows = await all<{
     id: string;
     name: string;
     enabled: number;
@@ -248,7 +352,10 @@ export function getSettings(): Settings {
     buff_uu_max: number;
     steam_min: number;
     steam_max: number;
-  }>;
+  }>(
+    database,
+    "SELECT id, name, enabled, buff_uu_min, buff_uu_max, steam_min, steam_max FROM cases ORDER BY id",
+  );
 
   const cases: Record<string, CaseConfig> = {};
   for (const row of caseRows) {
@@ -274,167 +381,170 @@ export function getSettings(): Settings {
   };
 }
 
+export function getSettings(): Promise<Settings> {
+  return withDb((database) => getSettingsInternal(database));
+}
+
 export function setSwitches(switches: SwitchesConfig) {
-  setSection(getDb(), "switches", switches);
+  return withDb((database) => setSection(database, "switches", switches));
 }
 
 export function setCooldown(cooldown: CooldownConfig) {
-  setSection(getDb(), "cooldown", cooldown);
+  return withDb((database) => setSection(database, "cooldown", cooldown));
 }
 
 export function setScrape(scrape: ScrapeConfig) {
-  setSection(getDb(), "scrape", normalizeScrape(scrape));
+  return withDb((database) => setSection(database, "scrape", normalizeScrape(scrape)));
 }
 
-export function getCasesState(): Record<string, CaseState> {
-  const database = getDb();
-  const settings = getSettings();
-  const stateRows = database
-    .prepare(
+export function getCasesState(): Promise<Record<string, CaseState>> {
+  return withDb(async (database) => {
+    const settings = await getSettingsInternal(database);
+    const stateRows = await all<{
+      case_id: string;
+      total_seconds: number;
+      current_session_seconds: number;
+      in_cooldown: number;
+      remaining_days: number;
+    }>(
+      database,
       "SELECT case_id, total_seconds, current_session_seconds, in_cooldown, remaining_days FROM case_state",
-    )
-    .all() as Array<{
-    case_id: string;
-    total_seconds: number;
-    current_session_seconds: number;
-    in_cooldown: number;
-    remaining_days: number;
-  }>;
-
-  const byId = new Map(stateRows.map((row) => [row.case_id, row]));
-  const result: Record<string, CaseState> = {};
-
-  for (const caseId of Object.keys(settings.cases)) {
-    const row = byId.get(caseId);
-    result[caseId] = normalizeCaseState(
-      row
-        ? {
-            total_seconds: row.total_seconds,
-            current_session_seconds: row.current_session_seconds,
-            in_cooldown: row.in_cooldown !== 0,
-            remaining_days: row.remaining_days,
-          }
-        : undefined,
     );
-    ensureCaseState(database, caseId, result[caseId]);
-  }
 
-  return result;
+    const byId = new Map(stateRows.map((row) => [row.case_id, row]));
+    const result: Record<string, CaseState> = {};
+
+    for (const caseId of Object.keys(settings.cases)) {
+      const row = byId.get(caseId);
+      result[caseId] = normalizeCaseState(
+        row
+          ? {
+              total_seconds: row.total_seconds,
+              current_session_seconds: row.current_session_seconds,
+              in_cooldown: row.in_cooldown !== 0,
+              remaining_days: row.remaining_days,
+            }
+          : undefined,
+      );
+      await ensureCaseState(database, caseId, result[caseId]);
+    }
+
+    return result;
+  });
 }
 
 export function saveCase(caseId: string, caseConfig: CaseConfig) {
-  const database = getDb();
-  database.exec("BEGIN");
-  try {
-    upsertCase(database, caseId, caseConfig);
-    ensureCaseState(database, caseId);
-    database.exec("COMMIT");
-  } catch (error) {
-    database.exec("ROLLBACK");
-    throw error;
-  }
+  return withDb((database) =>
+    transaction(database, async () => {
+      await upsertCase(database, caseId, caseConfig);
+      await ensureCaseState(database, caseId);
+    }),
+  );
 }
 
-export function deleteCase(caseId: string): boolean {
-  const database = getDb();
-  database.exec("BEGIN");
-  try {
-    const result = database.prepare("DELETE FROM cases WHERE id = ?").run(caseId);
-    database.prepare("DELETE FROM case_state WHERE case_id = ?").run(caseId);
-    database.exec("COMMIT");
-    return result.changes > 0;
-  } catch (error) {
-    database.exec("ROLLBACK");
-    throw error;
-  }
+export function deleteCase(caseId: string): Promise<boolean> {
+  return withDb((database) =>
+    transaction(database, async () => {
+      const result = await run(database, "DELETE FROM cases WHERE id = ?", [caseId]);
+      await run(database, "DELETE FROM case_state WHERE case_id = ?", [caseId]);
+      return result.changes > 0;
+    }),
+  );
 }
 
 export function resetAllCooldowns() {
-  getDb()
-    .prepare(
+  return withDb(async (database) => {
+    await run(
+      database,
       "UPDATE case_state SET current_session_seconds = 0, in_cooldown = 0, remaining_days = 0",
-    )
-    .run();
+    );
+  });
 }
 
-export function resetCaseCooldown(caseId: string): boolean {
-  const database = getDb();
-  const exists = database.prepare("SELECT 1 FROM cases WHERE id = ?").get(caseId);
-  if (!exists) {
-    return false;
-  }
+export function resetCaseCooldown(caseId: string): Promise<boolean> {
+  return withDb(async (database) => {
+    const exists = await get<{ found: number }>(
+      database,
+      "SELECT 1 AS found FROM cases WHERE id = ?",
+      [caseId],
+    );
+    if (!exists) {
+      return false;
+    }
 
-  ensureCaseState(database, caseId);
-  database
-    .prepare(
+    await ensureCaseState(database, caseId);
+    await run(
+      database,
       "UPDATE case_state SET current_session_seconds = 0, in_cooldown = 0, remaining_days = 0 WHERE case_id = ?",
-    )
-    .run(caseId);
-  return true;
+      [caseId],
+    );
+    return true;
+  });
 }
 
-export function getStartTime() {
-  const database = getDb();
-  let startTime = getMeta(database, "start_time");
-  if (!startTime) {
-    startTime = nowIso();
-    setMeta(database, "start_time", startTime);
-  }
+export function getStartTime(): Promise<string> {
+  return withDb(async (database) => {
+    let startTime = await getMeta(database, "start_time");
+    if (!startTime) {
+      startTime = nowIso();
+      await setMeta(database, "start_time", startTime);
+    }
 
-  return startTime;
+    return startTime;
+  });
 }
 
-export function getCsqaqContainersSyncedAt() {
-  return getMeta(getDb(), "csqaq_containers_synced_at");
+export function getCsqaqContainersSyncedAt(): Promise<string | null> {
+  return withDb((database) => getMeta(database, "csqaq_containers_synced_at"));
 }
 
 export function saveCsqaqContainers(containers: CsqaqContainer[]) {
-  const database = getDb();
-  const timestamp = nowIso();
-  const insert = database.prepare(
-    `INSERT OR REPLACE INTO csqaq_containers
-      (id, img, name, comment, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?)`,
-  );
+  return withDb((database) =>
+    transaction(database, async () => {
+      const timestamp = nowIso();
 
-  database.exec("BEGIN");
-  try {
-    database.prepare("DELETE FROM csqaq_containers").run();
-    for (const container of containers) {
-      insert.run(
-        container.id,
-        container.img ?? null,
-        container.name,
-        container.comment ?? null,
-        container.created_at ?? null,
-        timestamp,
-      );
-    }
-    setMeta(database, "csqaq_containers_synced_at", timestamp);
-    database.exec("COMMIT");
-    return timestamp;
-  } catch (error) {
-    database.exec("ROLLBACK");
-    throw error;
-  }
+      await run(database, "DELETE FROM csqaq_containers");
+      for (const container of containers) {
+        await run(
+          database,
+          `INSERT OR REPLACE INTO csqaq_containers
+            (id, img, name, comment, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+          [
+            container.id,
+            container.img ?? null,
+            container.name,
+            container.comment ?? null,
+            container.created_at ?? null,
+            timestamp,
+          ],
+        );
+      }
+      await setMeta(database, "csqaq_containers_synced_at", timestamp);
+      return timestamp;
+    }),
+  );
 }
 
-export function getStoredCsqaqContainers(): CsqaqContainer[] {
-  const rows = getDb()
-    .prepare("SELECT id, img, name, comment, created_at FROM csqaq_containers ORDER BY id")
-    .all() as Array<{
-    id: number;
-    img: string | null;
-    name: string;
-    comment: string | null;
-    created_at: string | null;
-  }>;
+export function getStoredCsqaqContainers(): Promise<CsqaqContainer[]> {
+  return withDb(async (database) => {
+    const rows = await all<{
+      id: number;
+      img: string | null;
+      name: string;
+      comment: string | null;
+      created_at: string | null;
+    }>(
+      database,
+      "SELECT id, img, name, comment, created_at FROM csqaq_containers ORDER BY id",
+    );
 
-  return rows.map((row) => ({
-    id: row.id,
-    img: row.img ?? undefined,
-    name: row.name,
-    comment: row.comment ?? undefined,
-    created_at: row.created_at ?? undefined,
-  }));
+    return rows.map((row) => ({
+      id: row.id,
+      img: row.img ?? undefined,
+      name: row.name,
+      comment: row.comment ?? undefined,
+      created_at: row.created_at ?? undefined,
+    }));
+  });
 }
