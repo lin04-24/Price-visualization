@@ -14,7 +14,6 @@ export type PriceAlert = {
   chinese_name: string;
   english_name?: string;
   prices: {
-    buff: number | null;
     yyyp: number | null;
     steam: number | null;
   };
@@ -115,7 +114,6 @@ function buildAlert(
   }
 
   const reasons: string[] = [];
-  addLimitReasons(reasons, "网易BUFF", item.buff_sell_price, config.buff_uu, settings.switches.buff_uu);
   addLimitReasons(reasons, "悠悠有品", item.yyyp_sell_price, config.buff_uu, settings.switches.buff_uu);
   addLimitReasons(reasons, "Steam市场", item.steam_sell_price, config.steam, settings.switches.steam);
 
@@ -128,7 +126,6 @@ function buildAlert(
     chinese_name: config.name || item.name || item.id,
     english_name: item.market_hash_name || config.market_hash_name,
     prices: {
-      buff: item.buff_sell_price,
       yyyp: item.yyyp_sell_price,
       steam: item.steam_sell_price,
     },
@@ -153,7 +150,6 @@ export function buildPriceAlertEmailText(alerts: PriceAlert[], checkedAt: string
       `${index + 1}. ${alert.chinese_name}`,
       `ID: ${alert.case_id}`,
       `英文名: ${alert.english_name || "未返回"}`,
-      `网易BUFF: ${formatPrice(alert.prices.buff)}`,
       `悠悠有品: ${formatPrice(alert.prices.yyyp)}`,
       `Steam市场: ${formatPrice(alert.prices.steam)}`,
       "提醒原因:",

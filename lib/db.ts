@@ -9,7 +9,6 @@ import type {
   CaseState,
   CooldownConfig,
   CsqaqContainer,
-  ScrapeConfig,
   Settings,
   SwitchesConfig,
 } from "./types";
@@ -119,14 +118,6 @@ function all<T>(database: Database, sql: string, params: SqlParameter[] = []) {
   });
 }
 
-function normalizeScrape(scrape?: Partial<ScrapeConfig>): ScrapeConfig {
-  return {
-    ...DEFAULT_SETTINGS.scrape,
-    ...scrape,
-    max_concurrency: 1,
-  };
-}
-
 function mergeSettings(base: Settings, override: Partial<Settings>): Settings {
   return {
     switches: {
@@ -149,10 +140,6 @@ function mergeSettings(base: Settings, override: Partial<Settings>): Settings {
       ...base.cooldown,
       ...override.cooldown,
     },
-    scrape: normalizeScrape({
-      ...base.scrape,
-      ...override.scrape,
-    }),
     cases: {
       ...base.cases,
       ...override.cases,
@@ -321,7 +308,6 @@ async function migrateJsonIfNeeded(database: Database) {
   await transaction(database, async () => {
     await setSection(database, "switches", settings.switches);
     await setSection(database, "cooldown", settings.cooldown);
-    await setSection(database, "scrape", settings.scrape);
     for (const [caseId, caseConfig] of Object.entries(settings.cases)) {
       await upsertCase(database, caseId, caseConfig);
       await ensureCaseState(database, caseId, jsonState[caseId]);
@@ -366,7 +352,7 @@ async function getSettingsInternal(database: Database): Promise<Settings> {
 
   const sections = Object.fromEntries(
     rows.map((row) => [row.section, JSON.parse(row.payload_json)]),
-  ) as Partial<Pick<Settings, "switches" | "cooldown" | "scrape">>;
+  ) as Partial<Pick<Settings, "switches" | "cooldown">>;
 
   const caseRows = await all<{
     id: string;
@@ -402,7 +388,6 @@ async function getSettingsInternal(database: Database): Promise<Settings> {
   return {
     switches: sections.switches ?? DEFAULT_SETTINGS.switches,
     cooldown: sections.cooldown ?? DEFAULT_SETTINGS.cooldown,
-    scrape: normalizeScrape(sections.scrape),
     cases,
   };
 }
@@ -417,10 +402,6 @@ export function setSwitches(switches: SwitchesConfig) {
 
 export function setCooldown(cooldown: CooldownConfig) {
   return withDb((database) => setSection(database, "cooldown", cooldown));
-}
-
-export function setScrape(scrape: ScrapeConfig) {
-  return withDb((database) => setSection(database, "scrape", normalizeScrape(scrape)));
 }
 
 export function getCasesState(): Promise<Record<string, CaseState>> {

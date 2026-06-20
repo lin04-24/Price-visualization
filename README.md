@@ -1,12 +1,20 @@
 # Price Visualization
 
-Steam 市场情报站配置管理面板。项目基于 Next.js App Router、React、TypeScript 和 SQLite，支持武器箱/饰品价格配置、CSQAQ 价格查询、自动批量监控与 QQ 邮箱提醒。
+当前版本：v0.1
+
+本项目采用 CC BY-NC 4.0（Creative Commons Attribution-NonCommercial）许可证。
+
+允许学习、修改、非商用分享；严禁任何盈利、商业产品、付费服务使用。
+
+感谢 [CSQAQ.COM](https://csqaq.com/) 提供的 API 接口，使本项目能够真正的落地实施。
+
+Steam 市场情报站配置管理面板。项目基于 Next.js App Router、React、TypeScript 和 SQLite，支持饰品价格配置、CSQAQ 价格查询、自动批量监控与 QQ 邮箱提醒。
 
 ## 功能概览
 
-- 武器箱配置管理：新增、编辑、删除、启用/禁用监控，点击卡片查看当前市场详情。
-- 全局开关配置：分别控制 BUFF / 悠悠有品、Steam 的上下限提醒。
-- 批量查询：手动批量查询已配置饰品的 BUFF、悠悠有品、Steam 当前价格。
+- 饰品配置管理：新增、编辑、删除、启用/禁用监控，点击卡片查看当前市场详情。
+- 全局开关配置：分别控制悠悠有品、Steam 的上下限提醒。
+- 批量查询：手动批量查询已配置饰品的悠悠有品、Steam 当前价格。
 - 自动监控：服务端每 30 分钟自动执行一次批量查询；若价格超出用户设置的各平台上下限，会发送邮件提醒。
 - 邮件提醒：提醒内容包含中文名、ID、英文名、各平台价格和触发原因。
 - CSQAQ 接入：服务端对外部 API 做短缓存、串行节流与 429 重试。
@@ -116,6 +124,25 @@ Windows 后台运行示例：
 Start-Process powershell -WindowStyle Hidden -ArgumentList '-NoExit','-Command','cd "C:\path\to\Price-visualization"; npm run start -- --hostname 0.0.0.0 --port 3000'
 ```
 
+## Windows 旧版本更新方法
+
+在已有项目目录中执行：
+
+```powershell
+cd C:\path\to\Price-visualization
+git pull
+npm install
+npm run build
+```
+
+如果使用前台方式启动，停止旧进程后重新运行：
+
+```powershell
+npm run start -- --hostname 0.0.0.0 --port 3000
+```
+
+如果使用 `Start-Process` 后台运行，先在任务管理器或 PowerShell 中停止旧的 Node.js 进程，再使用原启动命令重新启动。更新前请保留 `.env`、`data/app.db` 以及必要的数据文件。
+
 ## Linux 部署流程
 
 1. 安装 Node.js 20+、Git 和构建依赖。Ubuntu/Debian 示例：
@@ -164,6 +191,33 @@ http://服务器IP:3000
 ```
 
 如使用云服务器，请确认安全组/防火墙已放行 3000 端口，或使用 Nginx 反向代理到 127.0.0.1:3000。
+
+## Linux 旧版本更新方法
+
+在已有项目目录中执行：
+
+```bash
+cd /opt/Price-visualization
+git pull
+npm install
+npm run build
+```
+
+如果使用 systemd：
+
+```bash
+sudo systemctl restart price-visualization
+sudo systemctl status price-visualization
+```
+
+如果使用 PM2：
+
+```bash
+pm2 restart price-visualization
+pm2 save
+```
+
+如果使用 `nohup` 或前台命令，请先停止旧进程，再重新运行启动命令。更新前请保留 `.env`、`data/app.db` 以及必要的数据文件。
 
 ## Linux 持久化后台运行方案
 
@@ -244,7 +298,7 @@ ps aux | grep 'next start'
 中文名
 ID
 英文名
-网易BUFF、悠悠有品、Steam 市场价格
+悠悠有品、Steam 市场价格
 触发提醒的具体原因
 ```
 
@@ -288,7 +342,6 @@ GET    /api/uptime
 POST   /api/switches
 POST   /api/cooldown
 POST   /api/cooldown/reset
-POST   /api/scrape
 POST   /api/cases/[caseId]
 DELETE /api/cases/[caseId]
 POST   /api/cases/[caseId]/cooldown/reset

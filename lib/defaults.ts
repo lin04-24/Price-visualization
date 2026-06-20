@@ -32,23 +32,5 @@ export const DEFAULT_SETTINGS: Settings = {
     rise_7d_days: 3,
     fall_7d_days: 3,
   },
-  scrape: {
-    interval_seconds: 5,
-    timeout: 30000,
-    max_concurrency: 1,
-  },
-  cases: {
-    recoil_case: {
-      name: "Recoil Case",
-      enabled: true,
-      buff_uu: {
-        min_price: 0,
-        max_price: 999999,
-      },
-      steam: {
-        min_price: 0,
-        max_price: 999999,
-      },
-    },
-  },
+  cases: {},
 };

@@ -31,12 +31,6 @@ export interface CooldownConfig {
   fall_7d_days: number;
 }
 
-export interface ScrapeConfig {
-  interval_seconds: number;
-  timeout: number;
-  max_concurrency: number;
-}
-
 export interface PriceRangeConfig {
   min_price: number;
   max_price: number;
@@ -66,7 +60,6 @@ export interface CaseMarketSnapshot {
 export interface Settings {
   switches: SwitchesConfig;
   cooldown: CooldownConfig;
-  scrape: ScrapeConfig;
   cases: Record<string, CaseConfig>;
 }
 

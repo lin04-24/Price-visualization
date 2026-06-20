@@ -1,7 +1,7 @@
 "use client";
 
 import { AlertTriangle, Box, Loader2, Moon, Search, SlidersHorizontal, Sun, X, Zap } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { DEFAULT_SETTINGS } from "@/lib/defaults";
 import type {
   ApiResult,
@@ -14,15 +14,14 @@ import type {
   CsqaqGoodDetailResult,
   CsqaqGoodLookupResult,
   CooldownConfig,
-  ScrapeConfig,
   Settings,
   SwitchesConfig,
 } from "@/lib/types";
 
 const tabs = [
-  { label: "武器箱", icon: Box },
+  { label: "饰品栏", icon: Box },
   { label: "全局开关", icon: SlidersHorizontal },
-  { label: "冷却期/抓取", icon: Search },
+  { label: "冷却期", icon: Search },
 ];
 
 const emptyCase: CaseConfig = {
@@ -148,6 +147,26 @@ type CaseMarketSnapshotResult = ApiResult & {
   snapshot?: CaseMarketSnapshot;
 };
 
+type ConfigDashboardProps = {
+  initialSettings?: Settings;
+  initialCaseMarketSnapshots?: Record<string, CaseMarketSnapshot>;
+};
+
+function roundPriceBoundary(value: number) {
+  return Math.round(value * 100) / 100;
+}
+
+function buildDefaultPriceRange(price: number | null): CaseConfig["buff_uu"] | null {
+  if (price === null || price === undefined || !Number.isFinite(price) || price <= 0) {
+    return null;
+  }
+
+  return {
+    min_price: roundPriceBoundary(price * 0.8),
+    max_price: roundPriceBoundary(price * 1.2),
+  };
+}
+
 function formatBeijingDateTime(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) {
@@ -177,9 +196,14 @@ async function postJson<T>(url: string, payload?: T): Promise<ApiResult> {
   return (await response.json()) as ApiResult;
 }
 
-export function ConfigDashboard() {
-  const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
-  const [caseMarketSnapshots, setCaseMarketSnapshots] = useState<Record<string, CaseMarketSnapshot>>({});
+export function ConfigDashboard({
+  initialSettings = DEFAULT_SETTINGS,
+  initialCaseMarketSnapshots = {},
+}: ConfigDashboardProps = {}) {
+  const [settings, setSettings] = useState<Settings>(initialSettings);
+  const [caseMarketSnapshots, setCaseMarketSnapshots] = useState<Record<string, CaseMarketSnapshot>>(
+    initialCaseMarketSnapshots,
+  );
   const [activeTab, setActiveTab] = useState(0);
   const [darkMode, setDarkMode] = useState(true);
   const [toast, setToast] = useState<ToastState | null>(null);
@@ -192,6 +216,8 @@ export function ConfigDashboard() {
   });
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isLookupLoading, setIsLookupLoading] = useState(false);
+  const defaultPriceRequestIdRef = useRef(0);
+  const defaultPriceTimerRef = useRef<number | null>(null);
   const [containerSuggestions, setContainerSuggestions] = useState<CsqaqContainer[]>([]);
   const [isSuggestionLoading, setIsSuggestionLoading] = useState(false);
   const [showContainerSuggestions, setShowContainerSuggestions] = useState(false);
@@ -300,6 +326,69 @@ export function ConfigDashboard() {
     };
   }, [caseForm.data.name, editingCaseId, isModalOpen]);
 
+  useEffect(() => {
+    return () => {
+      defaultPriceRequestIdRef.current += 1;
+      if (defaultPriceTimerRef.current !== null) {
+        window.clearTimeout(defaultPriceTimerRef.current);
+      }
+    };
+  }, []);
+
+  function cancelDefaultPriceFill() {
+    defaultPriceRequestIdRef.current += 1;
+    if (defaultPriceTimerRef.current !== null) {
+      window.clearTimeout(defaultPriceTimerRef.current);
+      defaultPriceTimerRef.current = null;
+    }
+  }
+
+  function closeCaseModal() {
+    cancelDefaultPriceFill();
+    setIsModalOpen(false);
+  }
+
+  function scheduleDefaultPriceFill(goodId: string) {
+    cancelDefaultPriceFill();
+    const requestId = defaultPriceRequestIdRef.current + 1;
+    defaultPriceRequestIdRef.current = requestId;
+
+    defaultPriceTimerRef.current = window.setTimeout(() => {
+      defaultPriceTimerRef.current = null;
+      fetch(`/api/csqaq/goods/${encodeURIComponent(goodId)}`)
+        .then((response) => response.json() as Promise<CsqaqGoodDetailResult>)
+        .then((data) => {
+          if (requestId !== defaultPriceRequestIdRef.current) return;
+          if (!data.success || !data.item) {
+            throw new Error(data.message || "当前价格获取失败");
+          }
+
+          const yyypRange = buildDefaultPriceRange(data.item.yyyp_sell_price);
+          const steamRange = buildDefaultPriceRange(data.item.steam_sell_price);
+          if (!yyypRange && !steamRange) {
+            throw new Error("未获取到 Steam 或悠悠有品在售价");
+          }
+
+          setCaseForm((current) => {
+            if (current.id !== goodId) return current;
+            return {
+              ...current,
+              data: {
+                ...current.data,
+                ...(yyypRange ? { buff_uu: yyypRange } : {}),
+                ...(steamRange ? { steam: steamRange } : {}),
+              },
+            };
+          });
+          showToast("已按当前价格自动填入上下限");
+        })
+        .catch((error) => {
+          if (requestId !== defaultPriceRequestIdRef.current) return;
+          showToast(`自动获取当前价格失败: ${error instanceof Error ? error.message : "未知错误"}`, "error");
+        });
+    }, 1500);
+  }
+
   async function saveSwitches() {
     const data = await postJson("/api/switches", settings.switches);
     if (data.success) {
@@ -318,19 +407,11 @@ export function ConfigDashboard() {
     }
   }
 
-  async function saveScrape() {
-    const data = await postJson("/api/scrape", settings.scrape);
-    if (data.success) {
-      showToast("抓取配置已保存");
-    } else {
-      showToast(`保存失败: ${data.message || "未知错误"}`, "error");
-    }
-  }
 
   function resetAllCooldown() {
     openAppDialog({
       title: "重置所有冷却",
-      message: "确定要重置所有箱子的冷却期吗？此操作会清空当前冷却状态。",
+      message: "确定要重置所有饰品的冷却期吗？此操作会清空当前冷却状态。",
       confirmLabel: "重置",
       cancelLabel: "取消",
       variant: "warning",
@@ -364,6 +445,7 @@ export function ConfigDashboard() {
   }
 
   function openAddCaseModal() {
+    cancelDefaultPriceFill();
     setEditingCaseId(null);
     setCaseForm({
       id: "",
@@ -377,6 +459,7 @@ export function ConfigDashboard() {
   }
 
   function editCase(id: string) {
+    cancelDefaultPriceFill();
     const caseData = settings.cases[id];
     if (!caseData) {
       showToast("找不到配置", "error");
@@ -412,9 +495,10 @@ export function ConfigDashboard() {
         return;
       }
 
+      const goodId = String(data.good.id);
       setCaseForm((current) => ({
         ...current,
-        id: String(data.good?.id ?? current.id),
+        id: goodId,
         data: {
           ...current.data,
           name: data.good?.name ?? current.data.name,
@@ -423,6 +507,9 @@ export function ConfigDashboard() {
       }));
       setShowContainerSuggestions(false);
       showToast(`已匹配: ${data.good.name} / ID ${data.good.id}`);
+      if (!editingCaseId) {
+        scheduleDefaultPriceFill(goodId);
+      }
     } catch (error) {
       showToast(`查询失败: ${error instanceof Error ? error.message : "未知错误"}`, "error");
     } finally {
@@ -567,7 +654,7 @@ export function ConfigDashboard() {
     const data = await postJson(`/api/cases/${encodeURIComponent(id)}`, payload);
     if (data.success) {
       showToast(data.message || "配置已保存");
-      setIsModalOpen(false);
+      closeCaseModal();
       await loadSettings();
     } else {
       showToast(`保存失败: ${data.message || "未知错误"}`, "error");
@@ -610,12 +697,6 @@ export function ConfigDashboard() {
     }));
   }
 
-  function updateScrape(updater: (current: ScrapeConfig) => ScrapeConfig) {
-    setSettings((current) => ({
-      ...current,
-      scrape: updater(current.scrape),
-    }));
-  }
 
   return (
     <>
@@ -649,9 +730,8 @@ export function ConfigDashboard() {
         <main className="pager">
           <div className="pager-track" style={{ "--page": activeTab } as React.CSSProperties}>
             <section className={`panel ${activeTab === 0 ? "active" : ""}`}>
-              <div className="panel-title">武器箱配置</div>
               <button className="add-case-btn add-case-btn-top" onClick={openAddCaseModal}>
-                + 添加武器箱
+                + 添加饰品
               </button>
               <div className="case-list cases-ready">
                 {Object.entries(settings.cases).map(([id, caseData], index) => {
@@ -689,7 +769,7 @@ export function ConfigDashboard() {
                       </div>
                       <div className="case-config">
                         <div>
-                          <span>BUFF/悠悠有品</span>
+                          <span>悠悠有品</span>
                           <span>
                             {caseData.buff_uu.min_price} - {caseData.buff_uu.max_price}
                           </span>
@@ -753,7 +833,7 @@ export function ConfigDashboard() {
             <section className={`panel ${activeTab === 1 ? "active" : ""}`}>
               <div className="panel-title">全局开关</div>
               <SwitchCard
-                title="BUFF / 悠悠有品"
+                title="悠悠有品"
                 enabled={settings.switches.buff_uu.enabled}
                 onEnabledChange={(enabled) =>
                   updateSwitches((current) => ({
@@ -979,29 +1059,6 @@ export function ConfigDashboard() {
                   </button>
                 </div>
               </div>
-
-              <div className="panel-title">抓取配置</div>
-              <div className="card-surface">
-                <div className="form-group">
-                  <NumberField
-                    label="执行间隔（秒）"
-                    value={settings.scrape.interval_seconds}
-                    min={1}
-                    onChange={(value) =>
-                      updateScrape((current) => ({ ...current, interval_seconds: value }))
-                    }
-                  />
-                  <NumberField
-                    label="页面超时（毫秒）"
-                    value={settings.scrape.timeout}
-                    min={5000}
-                    onChange={(value) => updateScrape((current) => ({ ...current, timeout: value }))}
-                  />
-                </div>
-                <button className="btn btn-success" onClick={() => void saveScrape()}>
-                  保存抓取配置
-                </button>
-              </div>
             </section>
           </div>
         </main>
@@ -1097,14 +1154,14 @@ export function ConfigDashboard() {
         className={`modal ${isModalOpen ? "show" : ""}`}
         onMouseDown={(event) => {
           if (event.target === event.currentTarget) {
-            setIsModalOpen(false);
+            closeCaseModal();
           }
         }}
       >
         <div className="modal-content">
           <div className="modal-header">
-            <h2>{editingCaseId ? "编辑武器箱" : "添加武器箱"}</h2>
-            <button className="close" type="button" onClick={() => setIsModalOpen(false)}>
+            <h2>{editingCaseId ? "编辑饰品" : "添加饰品"}</h2>
+            <button className="close" type="button" onClick={closeCaseModal}>
               <X aria-hidden="true" />
             </button>
           </div>
@@ -1116,6 +1173,7 @@ export function ConfigDashboard() {
                 placeholder="输入不完整名称，例如：反冲"
                 onFocus={() => setShowContainerSuggestions(containerSuggestions.length > 0)}
                 onChange={(value) => {
+                  cancelDefaultPriceFill();
                   setCaseForm((current) => ({
                     ...current,
                     id: "",
@@ -1159,7 +1217,7 @@ export function ConfigDashboard() {
               value={caseForm.id}
               disabled={Boolean(editingCaseId)}
               placeholder="输入中文名后点击查询自动填写"
-              onChange={(value) => setCaseForm((current) => ({ ...current, id: value }))}
+              onChange={(value) => { cancelDefaultPriceFill(); setCaseForm((current) => ({ ...current, id: value })); }}
             />
           </div>
           <div className="checkbox-group">
@@ -1177,7 +1235,7 @@ export function ConfigDashboard() {
             <label htmlFor="case_enabled">启用监控</label>
           </div>
           <div className="price-section">
-            <h4>BUFF / 悠悠有品 价格</h4>
+            <h4>悠悠有品价格</h4>
             <div className="form-group">
               <NumberField
                 label="下限"
@@ -1243,7 +1301,7 @@ export function ConfigDashboard() {
             </div>
           </div>
           <div className="modal-actions">
-            <button className="btn btn-danger" onClick={() => setIsModalOpen(false)}>
+            <button className="btn btn-danger" onClick={closeCaseModal}>
               取消
             </button>
             <button className="btn btn-success" onClick={() => void saveCase()}>
@@ -1290,11 +1348,6 @@ export function ConfigDashboard() {
                   </div>
                   <div className="market-grid">
                     <div className="market-card">
-                      <span>网易BUFF</span>
-                      <strong>{formatPrice(item.buff_sell_price)}</strong>
-                      <small>{formatCount(item.buff_sell_num)}</small>
-                    </div>
-                    <div className="market-card">
                       <span>悠悠有品</span>
                       <strong>{formatPrice(item.yyyp_sell_price)}</strong>
                       <small>{formatCount(item.yyyp_sell_num)}</small>
@@ -1336,7 +1389,7 @@ export function ConfigDashboard() {
           {caseDetail?.loading ? (
             <div className="detail-state">
               <Loader2 className="spin-icon" aria-hidden="true" />
-              正在查询当前饰品的 BUFF、悠悠有品、Steam 在售价...
+              正在查询当前饰品的悠悠有品、Steam 在售价...
             </div>
           ) : caseDetail?.error ? (
             <div className="detail-state detail-state-error">{caseDetail.error}</div>
@@ -1362,11 +1415,6 @@ export function ConfigDashboard() {
                   </div>
                 </div>
                 <div className="market-grid">
-                  <div className="market-card">
-                    <span>网易BUFF</span>
-                    <strong>{formatPrice(caseDetail.data.buff_sell_price)}</strong>
-                    <small>{formatCount(caseDetail.data.buff_sell_num)}</small>
-                  </div>
                   <div className="market-card">
                     <span>悠悠有品</span>
                     <strong>{formatPrice(caseDetail.data.yyyp_sell_price)}</strong>

@@ -8,13 +8,13 @@ export async function GET(request: Request) {
   const name = searchParams.get("name")?.trim();
 
   if (!name) {
-    return errorResponse("请输入武器箱中文名");
+    return errorResponse("请输入饰品中文名");
   }
 
   try {
     const result = await lookupContainerByName(name);
     if (!result.container) {
-      return jsonResponse({ success: false, message: "未找到匹配的武器箱", matches: [] }, 404);
+      return jsonResponse({ success: false, message: "未找到匹配的饰品", matches: [] }, 404);
     }
 
     return jsonResponse({ success: true, ...result });
