@@ -54,6 +54,39 @@ function dotStuff(content: string) {
   return content.replace(/\r?\n/g, "\r\n").replace(/^\./gm, "..");
 }
 
+function encodeQuotedPrintable(value: string) {
+  const bytes = Buffer.from(value.replace(/\r?\n/g, "\r\n"), "utf8");
+  const lines: string[] = [];
+  let line = "";
+
+  function appendToken(token: string) {
+    if (line.length + token.length > 73) {
+      lines.push(`${line}=`);
+      line = "";
+    }
+    line += token;
+  }
+
+  for (let index = 0; index < bytes.length; index += 1) {
+    const byte = bytes[index];
+    if (byte === 13 && bytes[index + 1] === 10) {
+      lines.push(line);
+      line = "";
+      index += 1;
+      continue;
+    }
+
+    const token =
+      (byte >= 33 && byte <= 60) || (byte >= 62 && byte <= 126)
+        ? String.fromCharCode(byte)
+        : `=${byte.toString(16).toUpperCase().padStart(2, "0")}`;
+    appendToken(token);
+  }
+
+  lines.push(line);
+  return lines.join("\r\n");
+}
+
 function createMessage(config: EmailConfig, subject: string, text: string) {
   const date = new Date().toUTCString();
   return [
@@ -61,11 +94,12 @@ function createMessage(config: EmailConfig, subject: string, text: string) {
     `To: ${normalizeAddressList(config.to_addr).join(", ")}`,
     `Subject: ${encodeHeader(subject)}`,
     "MIME-Version: 1.0",
-    "Content-Type: text/plain; charset=utf-8",
-    "Content-Transfer-Encoding: base64",
+    "Content-Type: text/plain; charset=UTF-8",
+    "Content-Transfer-Encoding: quoted-printable",
+    `Message-ID: <${Date.now()}.${Math.random().toString(16).slice(2)}@price-visualization.local>`,
     `Date: ${date}`,
     "",
-    Buffer.from(text, "utf8").toString("base64").replace(/.{1,76}/g, "$&\r\n").trimEnd(),
+    encodeQuotedPrintable(text),
   ].join("\r\n");
 }
 
