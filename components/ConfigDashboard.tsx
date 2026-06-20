@@ -322,16 +322,28 @@ export function ConfigDashboard() {
     });
 
     try {
-      let goodId = /^\d+$/.test(caseId) ? caseId : "";
-      if (!goodId) {
+      const numericCaseId = /^\d+$/.test(caseId) ? caseId : "";
+      let goodId = "";
+      const nameForLookup = caseData.name.trim();
+
+      if (nameForLookup) {
         const lookupResponse = await fetch(
-          `/api/csqaq/goods/lookup?name=${encodeURIComponent(fallbackName)}`,
+          `/api/csqaq/goods/lookup?name=${encodeURIComponent(nameForLookup)}`,
         );
         const lookupData = (await lookupResponse.json()) as CsqaqGoodLookupResult;
-        if (!lookupResponse.ok || !lookupData.success || !lookupData.good) {
+        if (lookupResponse.ok && lookupData.success && lookupData.good) {
+          goodId = String(lookupData.good.id);
+        } else if (!numericCaseId) {
           throw new Error(lookupData.message || "无法匹配饰品 good_id");
         }
-        goodId = String(lookupData.good.id);
+      }
+
+      if (!goodId) {
+        goodId = numericCaseId;
+      }
+
+      if (!goodId) {
+        throw new Error("无法匹配饰品 good_id");
       }
 
       const detailResponse = await fetch(`/api/csqaq/goods/${encodeURIComponent(goodId)}`);
