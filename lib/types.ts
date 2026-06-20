@@ -67,6 +67,7 @@ export interface ApiResult {
   success: boolean;
   message?: string;
 }
+
 export interface CsqaqContainer {
   id: number;
   img?: string;
@@ -75,10 +76,18 @@ export interface CsqaqContainer {
   created_at?: string;
 }
 
-export interface CsqaqCaseDetailItem {
+export interface CsqaqGoodSummary {
+  id: number;
+  name: string;
+  market_hash_name?: string;
+}
+
+export interface CsqaqGoodDetail {
   id: string;
   name: string;
+  market_hash_name?: string;
   img?: string;
+  type?: string;
   rarity?: string;
   quality?: string;
   buff_sell_price: number | null;
@@ -93,12 +102,14 @@ export interface CsqaqCaseDetailItem {
 
 export interface CsqaqCaseDetail {
   container?: CsqaqContainer;
-  items: CsqaqCaseDetailItem[];
+  items: CsqaqGoodDetail[];
 }
 
-export interface CsqaqLookupResult {
-  success: boolean;
-  container?: CsqaqContainer;
-  matches?: CsqaqContainer[];
-  message?: string;
+export interface CsqaqGoodLookupResult extends ApiResult {
+  good?: CsqaqGoodSummary;
+  matches?: CsqaqGoodSummary[];
+}
+
+export interface CsqaqGoodDetailResult extends ApiResult {
+  item?: CsqaqGoodDetail;
 }

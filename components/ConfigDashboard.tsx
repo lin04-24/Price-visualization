@@ -6,8 +6,9 @@ import { DEFAULT_SETTINGS } from "@/lib/defaults";
 import type {
   ApiResult,
   CaseConfig,
-  CsqaqCaseDetail,
-  CsqaqLookupResult,
+  CsqaqGoodDetail,
+  CsqaqGoodDetailResult,
+  CsqaqGoodLookupResult,
   CaseState,
   CooldownConfig,
   ScrapeConfig,
@@ -47,7 +48,7 @@ type CaseFormState = {
 type CaseDetailState = {
   caseId: string;
   caseName: string;
-  data: CsqaqCaseDetail | null;
+  data: CsqaqGoodDetail | null;
   loading: boolean;
   error: string | null;
 };
@@ -281,28 +282,28 @@ export function ConfigDashboard() {
   async function lookupCaseId() {
     const name = caseForm.data.name.trim();
     if (!name) {
-      showToast("请先输入武器箱中文名", "error");
+      showToast("请先输入饰品中文名", "error");
       return;
     }
 
     setIsLookupLoading(true);
     try {
-      const response = await fetch(`/api/csqaq/containers/lookup?name=${encodeURIComponent(name)}`);
-      const data = (await response.json()) as CsqaqLookupResult;
-      if (!response.ok || !data.success || !data.container) {
-        showToast(data.message || "没有查询到对应武器箱", "error");
+      const response = await fetch(`/api/csqaq/goods/lookup?name=${encodeURIComponent(name)}`);
+      const data = (await response.json()) as CsqaqGoodLookupResult;
+      if (!response.ok || !data.success || !data.good) {
+        showToast(data.message || "没有查询到对应饰品", "error");
         return;
       }
 
       setCaseForm((current) => ({
         ...current,
-        id: String(data.container?.id ?? current.id),
+        id: String(data.good?.id ?? current.id),
         data: {
           ...current.data,
-          name: data.container?.name ?? current.data.name,
+          name: data.good?.name ?? current.data.name,
         },
       }));
-      showToast(`已匹配: ${data.container.name} / ID ${data.container.id}`);
+      showToast(`已匹配: ${data.good.name} / ID ${data.good.id}`);
     } catch (error) {
       showToast(`查询失败: ${error instanceof Error ? error.message : "未知错误"}`, "error");
     } finally {
@@ -321,30 +322,28 @@ export function ConfigDashboard() {
     });
 
     try {
-      let containerId = /^\d+$/.test(caseId) ? caseId : "";
-      if (!containerId) {
+      let goodId = /^\d+$/.test(caseId) ? caseId : "";
+      if (!goodId) {
         const lookupResponse = await fetch(
-          `/api/csqaq/containers/lookup?name=${encodeURIComponent(fallbackName)}`,
+          `/api/csqaq/goods/lookup?name=${encodeURIComponent(fallbackName)}`,
         );
-        const lookupData = (await lookupResponse.json()) as CsqaqLookupResult;
-        if (!lookupResponse.ok || !lookupData.success || !lookupData.container) {
-          throw new Error(lookupData.message || "无法匹配武器箱 ID");
+        const lookupData = (await lookupResponse.json()) as CsqaqGoodLookupResult;
+        if (!lookupResponse.ok || !lookupData.success || !lookupData.good) {
+          throw new Error(lookupData.message || "无法匹配饰品 good_id");
         }
-        containerId = String(lookupData.container.id);
+        goodId = String(lookupData.good.id);
       }
 
-      const detailResponse = await fetch(
-        `/api/csqaq/containers/${encodeURIComponent(containerId)}/items?limit=20`,
-      );
-      const detailData = (await detailResponse.json()) as CsqaqCaseDetail & ApiResult;
-      if (!detailResponse.ok || detailData.success === false) {
-        throw new Error(detailData.message || "详情查询失败");
+      const detailResponse = await fetch(`/api/csqaq/goods/${encodeURIComponent(goodId)}`);
+      const detailData = (await detailResponse.json()) as CsqaqGoodDetailResult;
+      if (!detailResponse.ok || !detailData.success || !detailData.item) {
+        throw new Error(detailData.message || "饰品详情查询失败");
       }
 
       setCaseDetail({
-        caseId: containerId,
-        caseName: detailData.container?.name ?? fallbackName,
-        data: detailData,
+        caseId: detailData.item.id,
+        caseName: detailData.item.name || fallbackName,
+        data: detailData.item,
         loading: false,
         error: null,
       });
@@ -362,7 +361,7 @@ export function ConfigDashboard() {
   async function saveCase() {
     const id = caseForm.id.trim();
     if (!id) {
-      showToast("请输入武器箱ID", "error");
+      showToast("请输入饰品ID", "error");
       return;
     }
 
@@ -472,7 +471,7 @@ export function ConfigDashboard() {
                       key={id}
                       role="button"
                       tabIndex={0}
-                      title="点击查看饰品市场详情"
+                      title="点击查看当前饰品市场详情"
                       style={{ "--card-index": Math.min(index, 8) } as React.CSSProperties}
                       onClick={() => void openCaseDetail(id, caseData)}
                       onKeyDown={(event) => {
@@ -870,9 +869,9 @@ export function ConfigDashboard() {
           </div>
           <div className="form-group lookup-form-group">
             <TextField
-              label="武器箱名称"
+              label="饰品名称"
               value={caseForm.data.name}
-              placeholder="例如: 梦魇武器箱"
+              placeholder="例如: 反冲武器箱"
               onChange={(value) =>
                 setCaseForm((current) => ({
                   ...current,
@@ -890,7 +889,7 @@ export function ConfigDashboard() {
               查询饰品ID
             </button>
             <TextField
-              label="武器箱ID"
+              label="饰品ID / good_id"
               value={caseForm.id}
               disabled={Boolean(editingCaseId)}
               placeholder="输入中文名后点击查询自动填写"
@@ -999,8 +998,8 @@ export function ConfigDashboard() {
         <div className="modal-content detail-modal-content">
           <div className="modal-header">
             <div>
-              <h2>{caseDetail?.caseName || "武器箱详情"}</h2>
-              <div className="detail-subtitle">收藏品 ID: {caseDetail?.caseId || "--"}</div>
+              <h2>{caseDetail?.caseName || "饰品详情"}</h2>
+              <div className="detail-subtitle">饰品 ID: {caseDetail?.caseId || "--"}</div>
             </div>
             <button className="close" type="button" onClick={() => setCaseDetail(null)}>
               <X aria-hidden="true" />
@@ -1010,44 +1009,53 @@ export function ConfigDashboard() {
           {caseDetail?.loading ? (
             <div className="detail-state">
               <Loader2 className="spin-icon" aria-hidden="true" />
-              正在查询前 20 个饰品的 BUFF、悠悠有品、Steam 在售价...
+              正在查询当前饰品的 BUFF、悠悠有品、Steam 在售价...
             </div>
           ) : caseDetail?.error ? (
             <div className="detail-state detail-state-error">{caseDetail.error}</div>
-          ) : caseDetail?.data?.items.length ? (
+          ) : caseDetail?.data ? (
             <div className="detail-items">
-              {caseDetail.data.items.map((item) => (
-                <article className="detail-item" key={item.id}>
-                  <div className="detail-item-head">
-                    {item.img ? <img alt="" src={item.img} /> : <div className="detail-item-img-placeholder" />}
-                    <div>
-                      <h3>{item.name}</h3>
-                      <div className="detail-item-meta">
-                        {[item.rarity, item.quality].filter(Boolean).join(" / ") || "饰品"}
-                      </div>
+              <article className="detail-item" key={caseDetail.data.id}>
+                <div className="detail-item-head">
+                  {caseDetail.data.img ? (
+                    <img alt="" src={caseDetail.data.img} />
+                  ) : (
+                    <div className="detail-item-img-placeholder" />
+                  )}
+                  <div>
+                    <h3>{caseDetail.data.name}</h3>
+                    <div className="detail-item-meta">
+                      {[caseDetail.data.type, caseDetail.data.rarity, caseDetail.data.quality]
+                        .filter(Boolean)
+                        .join(" / ") || "饰品"}
                     </div>
+                    {caseDetail.data.market_hash_name ? (
+                      <div className="detail-item-meta">{caseDetail.data.market_hash_name}</div>
+                    ) : null}
                   </div>
-                  <div className="market-grid">
-                    <div className="market-card">
-                      <span>网易BUFF</span>
-                      <strong>{formatPrice(item.buff_sell_price)}</strong>
-                      <small>{formatCount(item.buff_sell_num)}</small>
-                    </div>
-                    <div className="market-card">
-                      <span>悠悠有品</span>
-                      <strong>{formatPrice(item.yyyp_sell_price)}</strong>
-                      <small>{formatCount(item.yyyp_sell_num)}</small>
-                    </div>
-                    <div className="market-card">
-                      <span>Steam市场</span>
-                      <strong>{formatPrice(item.steam_sell_price)}</strong>
-                      <small>{formatCount(item.steam_sell_num)}</small>
-                    </div>
+                </div>
+                <div className="market-grid">
+                  <div className="market-card">
+                    <span>网易BUFF</span>
+                    <strong>{formatPrice(caseDetail.data.buff_sell_price)}</strong>
+                    <small>{formatCount(caseDetail.data.buff_sell_num)}</small>
                   </div>
-                  {item.error ? <div className="detail-item-error">{item.error}</div> : null}
-                  {item.updated_at ? <div className="detail-updated">更新时间: {item.updated_at}</div> : null}
-                </article>
-              ))}
+                  <div className="market-card">
+                    <span>悠悠有品</span>
+                    <strong>{formatPrice(caseDetail.data.yyyp_sell_price)}</strong>
+                    <small>{formatCount(caseDetail.data.yyyp_sell_num)}</small>
+                  </div>
+                  <div className="market-card">
+                    <span>Steam市场</span>
+                    <strong>{formatPrice(caseDetail.data.steam_sell_price)}</strong>
+                    <small>{formatCount(caseDetail.data.steam_sell_num)}</small>
+                  </div>
+                </div>
+                {caseDetail.data.error ? <div className="detail-item-error">{caseDetail.data.error}</div> : null}
+                {caseDetail.data.updated_at ? (
+                  <div className="detail-updated">更新时间: {caseDetail.data.updated_at}</div>
+                ) : null}
+              </article>
             </div>
           ) : (
             <div className="detail-state">暂无饰品详情数据</div>
