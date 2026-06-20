@@ -45,6 +45,7 @@ export interface PriceRangeConfig {
 export interface CaseConfig {
   name: string;
   enabled: boolean;
+  market_hash_name?: string;
   buff_uu: PriceRangeConfig;
   steam: PriceRangeConfig;
 }
@@ -119,4 +120,9 @@ export interface CsqaqGoodLookupResult extends ApiResult {
 
 export interface CsqaqGoodDetailResult extends ApiResult {
   item?: CsqaqGoodDetail;
+}
+
+export interface CsqaqGoodBatchPriceResult extends ApiResult {
+  count?: number;
+  items?: CsqaqGoodDetail[];
 }

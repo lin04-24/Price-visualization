@@ -1,6 +1,6 @@
 "use client";
 
-import { Box, Loader2, Moon, Search, SlidersHorizontal, Sun, X } from "lucide-react";
+import { Box, Loader2, Moon, Search, SlidersHorizontal, Sun, X, Zap } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { DEFAULT_SETTINGS } from "@/lib/defaults";
 import type {
@@ -8,6 +8,7 @@ import type {
   CaseConfig,
   CsqaqContainer,
   CsqaqContainerSearchResult,
+  CsqaqGoodBatchPriceResult,
   CsqaqGoodDetail,
   CsqaqGoodDetailResult,
   CsqaqGoodLookupResult,
@@ -51,6 +52,12 @@ type CaseDetailState = {
   caseId: string;
   caseName: string;
   data: CsqaqGoodDetail | null;
+  loading: boolean;
+  error: string | null;
+};
+
+type BatchPriceState = {
+  items: CsqaqGoodDetail[];
   loading: boolean;
   error: string | null;
 };
@@ -154,6 +161,7 @@ export function ConfigDashboard() {
   const [isSuggestionLoading, setIsSuggestionLoading] = useState(false);
   const [showContainerSuggestions, setShowContainerSuggestions] = useState(false);
   const [caseDetail, setCaseDetail] = useState<CaseDetailState | null>(null);
+  const [batchPrices, setBatchPrices] = useState<BatchPriceState | null>(null);
 
   const uptime = useMemo(
     () => formatUptime(serverStartTime),
@@ -347,6 +355,7 @@ export function ConfigDashboard() {
         data: {
           ...current.data,
           name: data.good?.name ?? current.data.name,
+          market_hash_name: data.good?.market_hash_name ?? current.data.market_hash_name,
         },
       }));
       setShowContainerSuggestions(false);
@@ -369,6 +378,32 @@ export function ConfigDashboard() {
     setContainerSuggestions([]);
     setShowContainerSuggestions(false);
     void lookupCaseId(container.name);
+  }
+
+  async function queryConfiguredCasePrices() {
+    const configuredCount = Object.keys(settings.cases).length;
+    if (configuredCount > 50) {
+      window.alert(`已配置 ${configuredCount} 个饰品，批量查询最多支持 50 个`);
+      return;
+    }
+
+    setBatchPrices({ items: [], loading: true, error: null });
+    try {
+      const response = await fetch("/api/csqaq/goods/prices/batch", { method: "POST" });
+      const data = (await response.json()) as CsqaqGoodBatchPriceResult;
+      if (!response.ok || !data.success) {
+        throw new Error(data.message || "批量查询失败");
+      }
+
+      setBatchPrices({ items: data.items ?? [], loading: false, error: null });
+      showToast(`已批量查询 ${data.count ?? data.items?.length ?? 0} 个饰品`);
+    } catch (error) {
+      setBatchPrices({
+        items: [],
+        loading: false,
+        error: error instanceof Error ? error.message : "批量查询失败",
+      });
+    }
   }
 
   async function openCaseDetail(caseId: string, caseData: CaseConfig) {
@@ -436,6 +471,7 @@ export function ConfigDashboard() {
     const payload: CaseConfig = {
       ...caseForm.data,
       name: caseForm.data.name.trim() || id,
+      market_hash_name: caseForm.data.market_hash_name,
     };
     const data = await postJson(`/api/cases/${encodeURIComponent(id)}`, payload);
     if (data.success) {
@@ -888,6 +924,19 @@ export function ConfigDashboard() {
         </main>
       </div>
 
+      {activeTab === 0 ? (
+        <button
+          className="batch-query-fab"
+          type="button"
+          title="批量查询已配置饰品价格"
+          aria-label="批量查询已配置饰品价格"
+          disabled={batchPrices?.loading}
+          onClick={() => void queryConfiguredCasePrices()}
+        >
+          {batchPrices?.loading ? <Loader2 className="spin-icon" aria-hidden="true" /> : <Zap aria-hidden="true" />}
+        </button>
+      ) : null}
+
       <nav className="tab-bar" role="tablist" aria-label="配置分区">
         <span className="tab-indicator" style={{ "--tab-index": activeTab } as React.CSSProperties} />
         {tabs.map((tab, index) => {
@@ -1079,7 +1128,68 @@ export function ConfigDashboard() {
           </div>
         </div>
       </div>
+      <div
+        className={`modal ${batchPrices ? "show" : ""}`}
+        onMouseDown={(event) => {
+          if (event.target === event.currentTarget) {
+            setBatchPrices(null);
+          }
+        }}
+      >
+        <div className="modal-content detail-modal-content batch-modal-content">
+          <div className="modal-header">
+            <div>
+              <h2>批量价格查询</h2>
+              <div className="detail-subtitle">已配置饰品: {batchPrices?.items.length ?? 0}</div>
+            </div>
+            <button className="close" type="button" onClick={() => setBatchPrices(null)}>
+              <X aria-hidden="true" />
+            </button>
+          </div>
 
+          {batchPrices?.loading ? (
+            <div className="detail-state">
+              <Loader2 className="spin-icon" aria-hidden="true" />
+              正在批量查询当前配置饰品价格...
+            </div>
+          ) : batchPrices?.error ? (
+            <div className="detail-state detail-state-error">{batchPrices.error}</div>
+          ) : batchPrices?.items.length ? (
+            <div className="detail-items batch-detail-items">
+              {batchPrices.items.map((item) => (
+                <article className="detail-item" key={`${item.id}-${item.market_hash_name ?? item.name}`}>
+                  <div className="detail-item-head batch-item-head">
+                    <div>
+                      <h3>{item.name}</h3>
+                      {item.market_hash_name ? <div className="detail-item-meta">{item.market_hash_name}</div> : null}
+                    </div>
+                  </div>
+                  <div className="market-grid">
+                    <div className="market-card">
+                      <span>网易BUFF</span>
+                      <strong>{formatPrice(item.buff_sell_price)}</strong>
+                      <small>{formatCount(item.buff_sell_num)}</small>
+                    </div>
+                    <div className="market-card">
+                      <span>悠悠有品</span>
+                      <strong>{formatPrice(item.yyyp_sell_price)}</strong>
+                      <small>{formatCount(item.yyyp_sell_num)}</small>
+                    </div>
+                    <div className="market-card">
+                      <span>Steam市场</span>
+                      <strong>{formatPrice(item.steam_sell_price)}</strong>
+                      <small>{formatCount(item.steam_sell_num)}</small>
+                    </div>
+                  </div>
+                  {item.error ? <div className="detail-item-error">{item.error}</div> : null}
+                </article>
+              ))}
+            </div>
+          ) : (
+            <div className="detail-state">暂无已配置饰品</div>
+          )}
+        </div>
+      </div>
       <div
         className={`modal ${caseDetail ? "show" : ""}`}
         onMouseDown={(event) => {

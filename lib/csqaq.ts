@@ -72,6 +72,23 @@ type RawGoodDetail = {
   };
 };
 
+type RawGoodBatchPrice = {
+  goodId?: number | string;
+  name?: string;
+  marketHashName?: string;
+  buffSellPrice?: number | string | null;
+  buffSellNum?: number | string | null;
+  yyypSellPrice?: number | string | null;
+  yyypSellNum?: number | string | null;
+  steamSellPrice?: number | string | null;
+  steamSellNum?: number | string | null;
+};
+
+type RawGoodBatchPriceResponse = {
+  success?: Record<string, RawGoodBatchPrice>;
+  error?: unknown[];
+};
+
 let containersCache: { expiresAt: number; promise: Promise<CsqaqContainer[]> } | null = null;
 let containerSyncPromise: Promise<CsqaqContainer[]> | null = null;
 let backgroundSyncStarted = false;
@@ -448,6 +465,42 @@ export async function getGoodMarketDetail(goodId: string | number) {
   return normalizeGoodDetail(detail);
 }
 
+function normalizeBatchPriceItem(marketHashName: string, item?: RawGoodBatchPrice): CsqaqGoodDetail {
+  return {
+    id: String(item?.goodId ?? marketHashName),
+    name: item?.name ?? marketHashName,
+    market_hash_name: item?.marketHashName ?? marketHashName,
+    buff_sell_price: toNumber(item?.buffSellPrice),
+    buff_sell_num: toNumber(item?.buffSellNum),
+    yyyp_sell_price: toNumber(item?.yyypSellPrice),
+    yyyp_sell_num: toNumber(item?.yyypSellNum),
+    steam_sell_price: toNumber(item?.steamSellPrice),
+    steam_sell_num: toNumber(item?.steamSellNum),
+  };
+}
+
+export async function getGoodBatchPrices(marketHashNameList: string[]) {
+  const uniqueNames = Array.from(new Set(marketHashNameList.map((name) => name.trim()).filter(Boolean)));
+  if (uniqueNames.length === 0) {
+    return [];
+  }
+
+  const result = await csqaqRequest<RawGoodBatchPriceResponse>("/goods/getPriceByMarketHashName", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ marketHashNameList: uniqueNames }),
+  });
+
+  const successfulItems = result.success ?? {};
+  return uniqueNames.map((marketHashName) => {
+    const item = successfulItems[marketHashName];
+    return item
+      ? normalizeBatchPriceItem(marketHashName, item)
+      : { ...normalizeBatchPriceItem(marketHashName), error: "批量价格接口未返回该饰品" };
+  });
+}
 export async function getContainerMarketItems(containerId: string | number, limit = 20) {
   const rawItems = (await getContainerItems(containerId)).slice(0, limit);
   const items: CsqaqGoodDetail[] = [];

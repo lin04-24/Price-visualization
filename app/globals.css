@@ -1073,3 +1073,57 @@ button:disabled {
 .suggestion-empty {
   padding: 10px;
 }
+.batch-query-fab {
+  align-items: center;
+  background: var(--tg-blue);
+  border: 0;
+  border-radius: 50%;
+  bottom: calc(var(--nav-height) + var(--safe-bottom) + 34px);
+  box-shadow: 0 12px 28px rgba(42, 171, 238, 0.34), 0 2px 8px rgba(17, 45, 78, 0.18);
+  color: #ffffff;
+  display: flex;
+  height: 56px;
+  justify-content: center;
+  position: fixed;
+  right: max(20px, calc((100vw - 1180px) / 2 + 20px));
+  transition:
+    background-color var(--motion-fast) var(--ease-out),
+    box-shadow var(--motion-fast) var(--ease-out),
+    transform var(--motion-fast) var(--ease-out);
+  width: 56px;
+  z-index: 60;
+}
+
+.batch-query-fab:hover,
+.batch-query-fab:focus-visible {
+  background: var(--tg-blue-dark);
+  box-shadow: 0 14px 32px rgba(42, 171, 238, 0.42), 0 0 0 4px rgba(42, 171, 238, 0.18);
+  outline: none;
+  transform: translateY(-2px);
+}
+
+.batch-query-fab:active {
+  transform: translateY(0);
+}
+
+.batch-query-fab svg {
+  height: 23px;
+  margin: 0;
+  width: 23px;
+}
+
+.batch-modal-content {
+  max-width: 1120px;
+}
+
+.batch-detail-items {
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+}
+
+.batch-item-head {
+  margin-bottom: 10px;
+}
+
+.batch-item-head h3 {
+  font-size: 16px;
+}

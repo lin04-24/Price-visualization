@@ -182,6 +182,7 @@ async function initSchema(database: Database) {
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
       enabled INTEGER NOT NULL,
+      market_hash_name TEXT,
       buff_uu_min REAL NOT NULL,
       buff_uu_max REAL NOT NULL,
       steam_min REAL NOT NULL,
@@ -214,6 +215,11 @@ async function initSchema(database: Database) {
     CREATE INDEX IF NOT EXISTS idx_csqaq_containers_name ON csqaq_containers(name);
   `,
   );
+
+  const columns = await all<{ name: string }>(database, "PRAGMA table_info(cases)");
+  if (!columns.some((column) => column.name === "market_hash_name")) {
+    await exec(database, "ALTER TABLE cases ADD COLUMN market_hash_name TEXT");
+  }
 }
 
 async function setMeta(database: Database, key: string, value: string) {
@@ -237,12 +243,13 @@ async function upsertCase(database: Database, id: string, caseConfig: CaseConfig
   await run(
     database,
     `INSERT OR REPLACE INTO cases
-        (id, name, enabled, buff_uu_min, buff_uu_max, steam_min, steam_max, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        (id, name, enabled, market_hash_name, buff_uu_min, buff_uu_max, steam_min, steam_max, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       id,
       caseConfig.name || id,
       caseConfig.enabled === false ? 0 : 1,
+      caseConfig.market_hash_name?.trim() || null,
       Number(caseConfig.buff_uu?.min_price ?? 0),
       Number(caseConfig.buff_uu?.max_price ?? 999999),
       Number(caseConfig.steam?.min_price ?? 0),
@@ -348,13 +355,14 @@ async function getSettingsInternal(database: Database): Promise<Settings> {
     id: string;
     name: string;
     enabled: number;
+    market_hash_name: string | null;
     buff_uu_min: number;
     buff_uu_max: number;
     steam_min: number;
     steam_max: number;
   }>(
     database,
-    "SELECT id, name, enabled, buff_uu_min, buff_uu_max, steam_min, steam_max FROM cases ORDER BY id",
+    "SELECT id, name, enabled, market_hash_name, buff_uu_min, buff_uu_max, steam_min, steam_max FROM cases ORDER BY id",
   );
 
   const cases: Record<string, CaseConfig> = {};
@@ -362,6 +370,7 @@ async function getSettingsInternal(database: Database): Promise<Settings> {
     cases[row.id] = {
       name: row.name,
       enabled: row.enabled !== 0,
+      market_hash_name: row.market_hash_name ?? undefined,
       buff_uu: {
         min_price: row.buff_uu_min,
         max_price: row.buff_uu_max,
