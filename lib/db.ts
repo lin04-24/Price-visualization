@@ -5,6 +5,7 @@ import { DEFAULT_SETTINGS } from "./defaults";
 import type { Database, RunResult } from "sqlite3";
 import type {
   CaseConfig,
+  CaseMarketSnapshot,
   CaseState,
   CooldownConfig,
   CsqaqContainer,
@@ -168,6 +169,15 @@ function normalizeCaseState(state?: Partial<CaseState>): CaseState {
   };
 }
 
+function normalizeNullableNumber(value: number | null | undefined) {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  const normalized = Number(value);
+  return Number.isFinite(normalized) ? normalized : null;
+}
+
 async function initSchema(database: Database) {
   await exec(
     database,
@@ -196,6 +206,13 @@ async function initSchema(database: Database) {
       current_session_seconds REAL NOT NULL DEFAULT 0,
       in_cooldown INTEGER NOT NULL DEFAULT 0,
       remaining_days INTEGER NOT NULL DEFAULT 0
+    );
+
+    CREATE TABLE IF NOT EXISTS case_market_snapshots (
+      case_id TEXT PRIMARY KEY,
+      steam_sell_price REAL,
+      yyyp_sell_price REAL,
+      updated_at TEXT NOT NULL
     );
 
     CREATE TABLE IF NOT EXISTS app_meta (
@@ -456,9 +473,71 @@ export function deleteCase(caseId: string): Promise<boolean> {
     transaction(database, async () => {
       const result = await run(database, "DELETE FROM cases WHERE id = ?", [caseId]);
       await run(database, "DELETE FROM case_state WHERE case_id = ?", [caseId]);
+      await run(database, "DELETE FROM case_market_snapshots WHERE case_id = ?", [caseId]);
       return result.changes > 0;
     }),
   );
+}
+
+export function getCaseMarketSnapshots(): Promise<Record<string, CaseMarketSnapshot>> {
+  return withDb(async (database) => {
+    const rows = await all<{
+      case_id: string;
+      steam_sell_price: number | null;
+      yyyp_sell_price: number | null;
+      updated_at: string;
+    }>(
+      database,
+      "SELECT case_id, steam_sell_price, yyyp_sell_price, updated_at FROM case_market_snapshots",
+    );
+
+    return Object.fromEntries(
+      rows.map((row) => [
+        row.case_id,
+        {
+          steam_sell_price: row.steam_sell_price,
+          yyyp_sell_price: row.yyyp_sell_price,
+          updated_at: row.updated_at,
+        },
+      ]),
+    );
+  });
+}
+
+export function saveCaseMarketSnapshot(
+  caseId: string,
+  snapshot: Pick<CaseMarketSnapshot, "steam_sell_price" | "yyyp_sell_price">,
+): Promise<CaseMarketSnapshot> {
+  return withDb(async (database) => {
+    const exists = await get<{ found: number }>(database, "SELECT 1 AS found FROM cases WHERE id = ?", [
+      caseId,
+    ]);
+    if (!exists) {
+      throw new Error("配置不存在");
+    }
+
+    const updatedAt = nowIso();
+    const normalizedSnapshot: CaseMarketSnapshot = {
+      steam_sell_price: normalizeNullableNumber(snapshot.steam_sell_price),
+      yyyp_sell_price: normalizeNullableNumber(snapshot.yyyp_sell_price),
+      updated_at: updatedAt,
+    };
+
+    await run(
+      database,
+      `INSERT OR REPLACE INTO case_market_snapshots
+        (case_id, steam_sell_price, yyyp_sell_price, updated_at)
+       VALUES (?, ?, ?, ?)`,
+      [
+        caseId,
+        normalizedSnapshot.steam_sell_price,
+        normalizedSnapshot.yyyp_sell_price,
+        normalizedSnapshot.updated_at,
+      ],
+    );
+
+    return normalizedSnapshot;
+  });
 }
 
 export function resetAllCooldowns() {
