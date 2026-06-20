@@ -105,6 +105,13 @@ export interface CsqaqCaseDetail {
   items: CsqaqGoodDetail[];
 }
 
+export interface CsqaqContainerSearchResult extends ApiResult {
+  matches: CsqaqContainer[];
+  container?: CsqaqContainer;
+  synced_at?: string | null;
+  count?: number;
+}
+
 export interface CsqaqGoodLookupResult extends ApiResult {
   good?: CsqaqGoodSummary;
   matches?: CsqaqGoodSummary[];

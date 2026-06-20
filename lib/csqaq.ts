@@ -1,7 +1,14 @@
+import {
+  getCsqaqContainersSyncedAt,
+  getStoredCsqaqContainers,
+  saveCsqaqContainers,
+} from "./db";
 import type { CsqaqContainer, CsqaqGoodDetail, CsqaqGoodSummary } from "./types";
 
 const CSQAQ_BASE_URL = "https://api.csqaq.com/api/v1";
 const CONTAINER_CACHE_MS = 1000 * 60 * 30;
+const CONTAINER_SYNC_INTERVAL_MS = 1000 * 60 * 60 * 24;
+const CONTAINER_SYNC_CHECK_MS = 1000 * 60 * 60;
 
 type CsqaqEnvelope<T> = {
   code: number;
@@ -61,6 +68,8 @@ type RawGoodDetail = {
 };
 
 let containersCache: { expiresAt: number; promise: Promise<CsqaqContainer[]> } | null = null;
+let containerSyncPromise: Promise<CsqaqContainer[]> | null = null;
+let backgroundSyncStarted = false;
 
 function getApiToken() {
   const token = process.env.CSQAQ_API_TOKEN?.trim();
@@ -116,6 +125,13 @@ function scoreName(primaryName: string, query: string, secondaryName = "") {
   return 0;
 }
 
+function shouldRefreshContainers() {
+  const syncedAt = getCsqaqContainersSyncedAt();
+  if (!syncedAt) return true;
+  const syncedTime = new Date(syncedAt).getTime();
+  return !Number.isFinite(syncedTime) || Date.now() - syncedTime >= CONTAINER_SYNC_INTERVAL_MS;
+}
+
 async function csqaqRequest<T>(path: string, init: RequestInit = {}) {
   const response = await fetch(`${CSQAQ_BASE_URL}${path}`, {
     ...init,
@@ -139,7 +155,7 @@ async function csqaqRequest<T>(path: string, init: RequestInit = {}) {
   return payload.data;
 }
 
-export async function getContainers() {
+async function fetchContainersFromCsqaq() {
   const now = Date.now();
   if (!containersCache || containersCache.expiresAt <= now) {
     containersCache = {
@@ -153,6 +169,58 @@ export async function getContainers() {
   return containersCache.promise;
 }
 
+export async function syncContainersFromCsqaq(force = false) {
+  if (!force && !shouldRefreshContainers()) {
+    return getStoredCsqaqContainers();
+  }
+
+  if (!containerSyncPromise) {
+    containerSyncPromise = fetchContainersFromCsqaq()
+      .then((containers) => {
+        saveCsqaqContainers(containers);
+        return containers;
+      })
+      .finally(() => {
+        containerSyncPromise = null;
+      });
+  }
+
+  return containerSyncPromise;
+}
+
+export function startContainerAutoSync() {
+  if (backgroundSyncStarted) return;
+  backgroundSyncStarted = true;
+
+  void syncContainersFromCsqaq().catch(() => undefined);
+  setInterval(() => {
+    void syncContainersFromCsqaq().catch(() => undefined);
+  }, CONTAINER_SYNC_CHECK_MS).unref?.();
+}
+
+export async function getContainers() {
+  const stored = getStoredCsqaqContainers();
+  if (stored.length > 0) {
+    if (shouldRefreshContainers()) {
+      void syncContainersFromCsqaq().catch(() => undefined);
+    }
+    return stored;
+  }
+
+  return syncContainersFromCsqaq(true);
+}
+
+export async function getContainerSyncStatus() {
+  if (shouldRefreshContainers()) {
+    await syncContainersFromCsqaq();
+  }
+
+  return {
+    synced_at: getCsqaqContainersSyncedAt(),
+    count: getStoredCsqaqContainers().length,
+  };
+}
+
 export async function findContainerById(containerId: string | number) {
   const id = Number(containerId);
   if (!Number.isFinite(id)) return undefined;
@@ -160,18 +228,19 @@ export async function findContainerById(containerId: string | number) {
   return containers.find((container) => container.id === id);
 }
 
-export async function lookupContainerByName(name: string) {
+export async function lookupContainerByName(name: string, limit = 8) {
   const containers = await getContainers();
   const matches = containers
-    .map((container) => ({ container, score: scoreName(container.name, name) }))
+    .map((container) => ({ container, score: scoreName(container.name, name, container.comment) }))
     .filter((match) => match.score > 0)
-    .sort((left, right) => right.score - left.score)
-    .slice(0, 5)
+    .sort((left, right) => right.score - left.score || left.container.id - right.container.id)
+    .slice(0, limit)
     .map((match) => match.container);
 
   return {
     container: matches[0],
     matches,
+    synced_at: getCsqaqContainersSyncedAt(),
   };
 }
 

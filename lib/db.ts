@@ -6,6 +6,7 @@ import type {
   CaseConfig,
   CaseState,
   CooldownConfig,
+  CsqaqContainer,
   ScrapeConfig,
   Settings,
   SwitchesConfig,
@@ -116,6 +117,17 @@ function initSchema(database: DatabaseSync) {
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS csqaq_containers (
+      id INTEGER PRIMARY KEY,
+      img TEXT,
+      name TEXT NOT NULL,
+      comment TEXT,
+      created_at TEXT,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_csqaq_containers_name ON csqaq_containers(name);
   `);
 }
 
@@ -370,4 +382,59 @@ export function getStartTime() {
   }
 
   return startTime;
+}
+
+export function getCsqaqContainersSyncedAt() {
+  return getMeta(getDb(), "csqaq_containers_synced_at");
+}
+
+export function saveCsqaqContainers(containers: CsqaqContainer[]) {
+  const database = getDb();
+  const timestamp = nowIso();
+  const insert = database.prepare(
+    `INSERT OR REPLACE INTO csqaq_containers
+      (id, img, name, comment, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+  );
+
+  database.exec("BEGIN");
+  try {
+    database.prepare("DELETE FROM csqaq_containers").run();
+    for (const container of containers) {
+      insert.run(
+        container.id,
+        container.img ?? null,
+        container.name,
+        container.comment ?? null,
+        container.created_at ?? null,
+        timestamp,
+      );
+    }
+    setMeta(database, "csqaq_containers_synced_at", timestamp);
+    database.exec("COMMIT");
+    return timestamp;
+  } catch (error) {
+    database.exec("ROLLBACK");
+    throw error;
+  }
+}
+
+export function getStoredCsqaqContainers(): CsqaqContainer[] {
+  const rows = getDb()
+    .prepare("SELECT id, img, name, comment, created_at FROM csqaq_containers ORDER BY id")
+    .all() as Array<{
+    id: number;
+    img: string | null;
+    name: string;
+    comment: string | null;
+    created_at: string | null;
+  }>;
+
+  return rows.map((row) => ({
+    id: row.id,
+    img: row.img ?? undefined,
+    name: row.name,
+    comment: row.comment ?? undefined,
+    created_at: row.created_at ?? undefined,
+  }));
 }

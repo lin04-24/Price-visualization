@@ -6,7 +6,7 @@ Steam 市场情报站配置管理面板。项目已迁移为 Next.js App Router 
 
 - 武器箱配置管理：新增、编辑、删除、启用/禁用监控，并可点击武器箱查看饰品市场详情。
 - 全局开关配置：BUFF / 悠悠有品、Steam、涨跌幅监控。
-- CSQAQ 接入：通过饰品中文名查询 good_id，并展示当前饰品在网易 BUFF、悠悠有品、Steam 市场的在售价。
+- CSQAQ 接入：每天自动同步武器箱/收藏品总览到 SQLite；添加时支持输入残缺名称选择候选，再查询 good_id，并展示当前饰品在网易 BUFF、悠悠有品、Steam 市场的在售价。
 - 冷却期配置：按不同规则设置冷却天数，并支持一键重置。
 - 抓取配置：执行间隔、页面超时；抓取固定为单线程，不并发。
 - 本地 SQLite 持久化：默认数据库为 `data/app.db`。
@@ -42,6 +42,12 @@ CSQAQ_API_TOKEN=你的 CSQAQ API Token
 `.env` 已被 `.gitignore` 忽略，不会提交到 GitHub。修改环境变量后需要重新启动 Next.js 服务。
 
 注意：CSQAQ 单件详情接口需要饰品 `good_id`，不是武器箱/收藏品 ID。旧配置如果保存过收藏品 ID，请在添加/编辑弹窗中输入饰品中文名并点击“查询饰品ID”重新填入。
+
+收藏品总览会缓存在 SQLite 表 `csqaq_containers` 中。服务启动后会启动后台检查任务，每小时检查一次，超过 24 小时会自动调用 CSQAQ `container_data_info` 刷新；添加饰品时输入 2 个以上字符也会触发缓存检查。也可以手动刷新：
+
+```powershell
+Invoke-WebRequest -Method POST http://127.0.0.1:3000/api/csqaq/containers
+```
 
 ## 本地开发部署
 

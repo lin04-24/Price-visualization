@@ -6,6 +6,8 @@ import { DEFAULT_SETTINGS } from "@/lib/defaults";
 import type {
   ApiResult,
   CaseConfig,
+  CsqaqContainer,
+  CsqaqContainerSearchResult,
   CsqaqGoodDetail,
   CsqaqGoodDetailResult,
   CsqaqGoodLookupResult,
@@ -148,6 +150,9 @@ export function ConfigDashboard() {
   });
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isLookupLoading, setIsLookupLoading] = useState(false);
+  const [containerSuggestions, setContainerSuggestions] = useState<CsqaqContainer[]>([]);
+  const [isSuggestionLoading, setIsSuggestionLoading] = useState(false);
+  const [showContainerSuggestions, setShowContainerSuggestions] = useState(false);
   const [caseDetail, setCaseDetail] = useState<CaseDetailState | null>(null);
 
   const uptime = useMemo(
@@ -196,6 +201,47 @@ export function ConfigDashboard() {
     const timer = window.setTimeout(() => setToast(null), 2500);
     return () => window.clearTimeout(timer);
   }, [toast]);
+  useEffect(() => {
+    if (!isModalOpen || editingCaseId) {
+      setContainerSuggestions([]);
+      setShowContainerSuggestions(false);
+      return;
+    }
+
+    const query = caseForm.data.name.trim();
+    if (query.length < 2) {
+      setContainerSuggestions([]);
+      setShowContainerSuggestions(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      setIsSuggestionLoading(true);
+      fetch(`/api/csqaq/containers?q=${encodeURIComponent(query)}&limit=8`, {
+        signal: controller.signal,
+      })
+        .then((response) => response.json() as Promise<CsqaqContainerSearchResult>)
+        .then((data) => {
+          if (!data.success) {
+            setContainerSuggestions([]);
+            return;
+          }
+          setContainerSuggestions(data.matches ?? []);
+          setShowContainerSuggestions(true);
+        })
+        .catch((error) => {
+          if (error instanceof DOMException && error.name === "AbortError") return;
+          setContainerSuggestions([]);
+        })
+        .finally(() => setIsSuggestionLoading(false));
+    }, 220);
+
+    return () => {
+      controller.abort();
+      window.clearTimeout(timer);
+    };
+  }, [caseForm.data.name, editingCaseId, isModalOpen]);
 
   async function saveSwitches() {
     const data = await postJson("/api/switches", settings.switches);
@@ -279,8 +325,8 @@ export function ConfigDashboard() {
   }
 
 
-  async function lookupCaseId() {
-    const name = caseForm.data.name.trim();
+  async function lookupCaseId(nameOverride?: string) {
+    const name = (nameOverride ?? caseForm.data.name).trim();
     if (!name) {
       showToast("请先输入饰品中文名", "error");
       return;
@@ -303,12 +349,26 @@ export function ConfigDashboard() {
           name: data.good?.name ?? current.data.name,
         },
       }));
+      setShowContainerSuggestions(false);
       showToast(`已匹配: ${data.good.name} / ID ${data.good.id}`);
     } catch (error) {
       showToast(`查询失败: ${error instanceof Error ? error.message : "未知错误"}`, "error");
     } finally {
       setIsLookupLoading(false);
     }
+  }
+
+  function selectContainerSuggestion(container: CsqaqContainer) {
+    setCaseForm((current) => ({
+      ...current,
+      data: {
+        ...current.data,
+        name: container.name,
+      },
+    }));
+    setContainerSuggestions([]);
+    setShowContainerSuggestions(false);
+    void lookupCaseId(container.name);
   }
 
   async function openCaseDetail(caseId: string, caseData: CaseConfig) {
@@ -880,17 +940,42 @@ export function ConfigDashboard() {
             </button>
           </div>
           <div className="form-group lookup-form-group">
-            <TextField
-              label="饰品名称"
-              value={caseForm.data.name}
-              placeholder="例如: 反冲武器箱"
-              onChange={(value) =>
-                setCaseForm((current) => ({
-                  ...current,
-                  data: { ...current.data, name: value },
-                }))
-              }
-            />
+            <div className="suggestion-field">
+              <TextField
+                label="饰品名称"
+                value={caseForm.data.name}
+                placeholder="输入不完整名称，例如：反冲"
+                onFocus={() => setShowContainerSuggestions(containerSuggestions.length > 0)}
+                onChange={(value) => {
+                  setCaseForm((current) => ({
+                    ...current,
+                    id: "",
+                    data: { ...current.data, name: value },
+                  }));
+                  setShowContainerSuggestions(true);
+                }}
+              />
+              {showContainerSuggestions && (containerSuggestions.length > 0 || isSuggestionLoading) ? (
+                <div className="suggestion-menu">
+                  {isSuggestionLoading ? <div className="suggestion-empty">正在搜索本地收藏品库...</div> : null}
+                  {containerSuggestions.map((container) => (
+                    <button
+                      className="suggestion-option"
+                      key={container.id}
+                      type="button"
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => selectContainerSuggestion(container)}
+                    >
+                      {container.img ? <img alt="" src={container.img} /> : <span className="suggestion-img" />}
+                      <span>
+                        <strong>{container.name}</strong>
+                        <small>{container.comment || "收藏品"} / 收藏品ID {container.id}</small>
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
             <button
               className="btn btn-primary lookup-btn"
               type="button"
@@ -1193,12 +1278,14 @@ function TextField({
   disabled,
   placeholder,
   onChange,
+  onFocus,
 }: {
   label: string;
   value: string;
   disabled?: boolean;
   placeholder?: string;
   onChange: (value: string) => void;
+  onFocus?: () => void;
 }) {
   return (
     <div className="form-item">
@@ -1208,6 +1295,7 @@ function TextField({
         placeholder={placeholder}
         type="text"
         value={value}
+        onFocus={onFocus}
         onChange={(event) => onChange(event.target.value)}
       />
     </div>
