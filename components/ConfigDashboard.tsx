@@ -6,12 +6,12 @@ import { DEFAULT_SETTINGS } from "@/lib/defaults";
 import type {
   ApiResult,
   CaseConfig,
+  CaseMarketSnapshot,
   CsqaqContainer,
   CsqaqContainerSearchResult,
   CsqaqGoodDetail,
   CsqaqGoodDetailResult,
   CsqaqGoodLookupResult,
-  CaseState,
   CooldownConfig,
   ScrapeConfig,
   Settings,
@@ -55,38 +55,6 @@ type CaseDetailState = {
   error: string | null;
 };
 
-function formatDuration(seconds: number) {
-  const rounded = Math.round(seconds * 10) / 10;
-
-  if (rounded < 60) {
-    return `${rounded.toFixed(1)}秒`;
-  }
-
-  if (rounded < 3600) {
-    const minutes = Math.floor(rounded / 60);
-    const remainSeconds = (rounded % 60).toFixed(1);
-    return `${minutes}分${remainSeconds}秒`;
-  }
-
-  if (rounded < 86400) {
-    const hours = Math.floor(rounded / 3600);
-    const remainMinutes = Math.floor((rounded % 3600) / 60);
-    const remainSeconds = (rounded % 60).toFixed(1);
-    return remainMinutes > 0
-      ? `${hours}时${remainMinutes}分${remainSeconds}秒`
-      : `${hours}时${remainSeconds}秒`;
-  }
-
-  const days = Math.floor(rounded / 86400);
-  const remainHours = Math.floor((rounded % 86400) / 3600);
-  const remainMinutes = Math.floor((rounded % 3600) / 60);
-  const remainSeconds = (rounded % 60).toFixed(1);
-  let result = `${days}天`;
-  if (remainHours > 0) result += `${remainHours}时`;
-  if (remainMinutes > 0) result += `${remainMinutes}分`;
-  return `${result}${remainSeconds}秒`;
-}
-
 function formatUptime(startTime: string | null) {
   if (!startTime) {
     return "加载中...";
@@ -124,6 +92,32 @@ function formatCount(value: number | null) {
   return `${value.toLocaleString("zh-CN")}件在售`;
 }
 
+type SettingsResponse = Settings & {
+  case_market_snapshots?: Record<string, CaseMarketSnapshot>;
+};
+
+type CaseMarketSnapshotResult = ApiResult & {
+  snapshot?: CaseMarketSnapshot;
+};
+
+function formatBeijingDateTime(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return new Intl.DateTimeFormat("zh-CN", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).format(date);
+}
+
 async function postJson<T>(url: string, payload?: T): Promise<ApiResult> {
   const response = await fetch(url, {
     method: "POST",
@@ -137,9 +131,9 @@ async function postJson<T>(url: string, payload?: T): Promise<ApiResult> {
 
 export function ConfigDashboard() {
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
-  const [casesState, setCasesState] = useState<Record<string, CaseState>>({});
+  const [caseMarketSnapshots, setCaseMarketSnapshots] = useState<Record<string, CaseMarketSnapshot>>({});
   const [activeTab, setActiveTab] = useState(0);
-  const [darkMode, setDarkMode] = useState(false);
+  const [darkMode, setDarkMode] = useState(true);
   const [toast, setToast] = useState<ToastState | null>(null);
   const [serverStartTime, setServerStartTime] = useState<string | null>(null);
   const [nowTick, setNowTick] = useState(0);
@@ -164,15 +158,12 @@ export function ConfigDashboard() {
     setToast({ message, type });
   }
 
-  async function loadCasesState() {
-    const response = await fetch("/api/cases/state");
-    setCasesState((await response.json()) as Record<string, CaseState>);
-  }
-
   async function loadSettings() {
     const response = await fetch("/api/settings");
-    setSettings((await response.json()) as Settings);
-    await loadCasesState();
+    const data = (await response.json()) as SettingsResponse;
+    const { case_market_snapshots: snapshots = {}, ...loadedSettings } = data;
+    setSettings(loadedSettings);
+    setCaseMarketSnapshots(snapshots);
   }
 
   useEffect(() => {
@@ -275,7 +266,6 @@ export function ConfigDashboard() {
     const data = await postJson("/api/cooldown/reset");
     if (data.success) {
       showToast("已重置所有冷却期");
-      await loadCasesState();
     } else {
       showToast(`重置失败: ${data.message || "未知错误"}`, "error");
     }
@@ -286,7 +276,6 @@ export function ConfigDashboard() {
     const data = await postJson(`/api/cases/${encodeURIComponent(caseId)}/cooldown/reset`);
     if (data.success) {
       showToast(data.message || "已重置冷却期");
-      await loadCasesState();
     } else {
       showToast(`重置失败: ${data.message || "未知错误"}`, "error");
     }
@@ -415,6 +404,23 @@ export function ConfigDashboard() {
         loading: false,
         error: null,
       });
+
+      void postJson<Pick<CaseMarketSnapshot, "steam_sell_price" | "yyyp_sell_price">>(
+        `/api/cases/${encodeURIComponent(caseId)}/market-snapshot`,
+        {
+          steam_sell_price: detailData.item.steam_sell_price,
+          yyyp_sell_price: detailData.item.yyyp_sell_price,
+        },
+      )
+        .then((snapshotResponse) => snapshotResponse as CaseMarketSnapshotResult)
+        .then((snapshotResponse) => {
+          if (!snapshotResponse.success || !snapshotResponse.snapshot) return;
+          setCaseMarketSnapshots((current) => ({
+            ...current,
+            [caseId]: snapshotResponse.snapshot as CaseMarketSnapshot,
+          }));
+        })
+        .catch(() => undefined);
     } catch (error) {
       setCaseDetail((current) => ({
         caseId: current?.caseId ?? caseId,
@@ -520,17 +526,7 @@ export function ConfigDashboard() {
               </button>
               <div className="case-list cases-ready">
                 {Object.entries(settings.cases).map(([id, caseData], index) => {
-                  const state = casesState[id] || {
-                    total_seconds: 0,
-                    current_session_seconds: 0,
-                    in_cooldown: false,
-                    remaining_days: 0,
-                  };
-                  const status = state.in_cooldown
-                    ? `冷却中 (剩余${state.remaining_days}天)`
-                    : state.current_session_seconds > 0
-                      ? `监控中 (${formatDuration(state.current_session_seconds)})`
-                      : "等待监控";
+                  const snapshot = caseMarketSnapshots[id];
 
                   return (
                     <article
@@ -576,25 +572,19 @@ export function ConfigDashboard() {
                           </span>
                         </div>
                       </div>
-                      <div className="case-status">
-                        <div className="status-row">
-                          <span className="status-label">状态:</span>
-                          <span
-                            className={`status-value ${
-                              state.in_cooldown
-                                ? "status-cooldown"
-                                : state.current_session_seconds > 0
-                                  ? "status-monitoring"
-                                  : "status-idle"
-                            }`}
-                          >
-                            {status}
-                          </span>
+                      <div className="case-market-snapshot">
+                        <div className="market-snapshot-row">
+                          <span>Steam在售价</span>
+                          <strong>{formatPrice(snapshot?.steam_sell_price ?? null)}</strong>
                         </div>
-                        <div className="status-row">
-                          <span className="status-label">总监控:</span>
-                          <span className="status-value">{formatDuration(state.total_seconds)}</span>
+                        <div className="market-snapshot-row">
+                          <span>悠悠有品在售价</span>
+                          <strong>{formatPrice(snapshot?.yyyp_sell_price ?? null)}</strong>
                         </div>
+                        <small>
+                          上次用户更新时间（北京时间）：
+                          {snapshot?.updated_at ? formatBeijingDateTime(snapshot.updated_at) : "暂无"}
+                        </small>
                       </div>
                       <div className="case-actions">
                         <button

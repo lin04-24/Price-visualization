@@ -56,6 +56,12 @@ export interface CaseState {
   remaining_days: number;
 }
 
+export interface CaseMarketSnapshot {
+  steam_sell_price: number | null;
+  yyyp_sell_price: number | null;
+  updated_at: string;
+}
+
 export interface Settings {
   switches: SwitchesConfig;
   cooldown: CooldownConfig;

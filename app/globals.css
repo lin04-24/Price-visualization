@@ -499,14 +499,15 @@ body[data-theme="dark"] .ico-moon {
 }
 
 .case-config div,
-.status-row {
+.market-snapshot-row {
   display: flex;
   gap: 12px;
   justify-content: space-between;
 }
 
-.case-status {
+.case-market-snapshot {
   background: var(--status-bg);
+  border: 1px solid var(--tg-line);
   border-radius: 8px;
   display: grid;
   gap: 8px;
@@ -514,27 +515,27 @@ body[data-theme="dark"] .ico-moon {
   padding: 11px 12px;
 }
 
-.status-label {
+.market-snapshot-row span,
+.case-market-snapshot small {
   color: var(--tg-muted);
 }
 
-.status-value {
-  font-weight: 700;
+.market-snapshot-row strong {
+  color: var(--tg-text);
+  font-size: 16px;
   text-align: right;
 }
 
-.status-cooldown {
-  color: var(--tg-danger);
+.case-market-snapshot small {
+  border-top: 1px solid var(--tg-line);
+  font-size: 11px;
+  line-height: 1.45;
+  padding-top: 8px;
 }
 
-.status-monitoring {
-  color: var(--tg-success);
+body[data-theme="dark"] .case-market-snapshot {
+  background: #121b25;
 }
-
-.status-idle {
-  color: var(--tg-muted);
-}
-
 .switch-card {
   border-radius: 8px;
   margin-bottom: 14px;
