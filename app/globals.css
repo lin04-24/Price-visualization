@@ -248,7 +248,7 @@ body[data-theme="dark"] .ico-moon {
 
 .pager-track {
   display: grid;
-  grid-template-columns: repeat(4, 100%);
+  grid-template-columns: repeat(3, 100%);
   transform: translateX(calc(var(--page, 0) * -100%));
   transition: transform var(--motion-slide) var(--ease-tg);
   width: 100%;
@@ -267,6 +267,16 @@ body[data-theme="dark"] .ico-moon {
 .panel.active {
   opacity: 1;
   transform: translateY(0);
+}
+
+.settings-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.settings-panel .panel-title {
+  margin-bottom: 0;
 }
 
 .panel-title {
@@ -693,7 +703,7 @@ body[data-theme="dark"] .ico-moon {
   box-shadow: var(--tg-shadow);
   display: grid;
   gap: 2px;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   height: var(--nav-height);
   left: 50%;
   max-width: 560px;
@@ -713,7 +723,7 @@ body[data-theme="dark"] .ico-moon {
   top: 7px;
   transform: translateX(calc(var(--tab-index, 0) * 100%));
   transition: transform var(--motion-slide) var(--ease-tg);
-  width: calc((100% - 14px) / 4);
+  width: calc((100% - 14px) / 3);
   z-index: 0;
 }
 

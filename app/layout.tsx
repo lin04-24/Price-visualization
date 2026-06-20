@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Steam市场情报站 - 配置管理",
+  title: "Steam市场情报站",
   description: "Steam市场情报站本地配置管理面板",
 };
 

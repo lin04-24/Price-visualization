@@ -35,6 +35,14 @@ function readJsonFile<T>(filePath: string, fallback: T): T {
   }
 }
 
+function normalizeScrape(scrape?: Partial<ScrapeConfig>): ScrapeConfig {
+  return {
+    ...DEFAULT_SETTINGS.scrape,
+    ...scrape,
+    max_concurrency: 1,
+  };
+}
+
 function mergeSettings(base: Settings, override: Partial<Settings>): Settings {
   return {
     switches: {
@@ -57,10 +65,10 @@ function mergeSettings(base: Settings, override: Partial<Settings>): Settings {
       ...base.cooldown,
       ...override.cooldown,
     },
-    scrape: {
+    scrape: normalizeScrape({
       ...base.scrape,
       ...override.scrape,
-    },
+    }),
     cases: {
       ...base.cases,
       ...override.cases,
@@ -249,7 +257,7 @@ export function getSettings(): Settings {
   return {
     switches: sections.switches ?? DEFAULT_SETTINGS.switches,
     cooldown: sections.cooldown ?? DEFAULT_SETTINGS.cooldown,
-    scrape: sections.scrape ?? DEFAULT_SETTINGS.scrape,
+    scrape: normalizeScrape(sections.scrape),
     cases,
   };
 }
@@ -263,7 +271,7 @@ export function setCooldown(cooldown: CooldownConfig) {
 }
 
 export function setScrape(scrape: ScrapeConfig) {
-  setSection(getDb(), "scrape", scrape);
+  setSection(getDb(), "scrape", normalizeScrape(scrape));
 }
 
 export function getCasesState(): Record<string, CaseState> {

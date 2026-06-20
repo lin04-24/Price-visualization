@@ -35,7 +35,7 @@ export const DEFAULT_SETTINGS: Settings = {
   scrape: {
     interval_seconds: 5,
     timeout: 30000,
-    max_concurrency: 2,
+    max_concurrency: 1,
   },
   cases: {
     recoil_case: {

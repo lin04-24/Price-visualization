@@ -1,14 +1,6 @@
 "use client";
 
-import {
-  Box,
-  Clock3,
-  Moon,
-  Search,
-  SlidersHorizontal,
-  Sun,
-  X,
-} from "lucide-react";
+import { Box, Moon, Search, SlidersHorizontal, Sun, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { DEFAULT_SETTINGS } from "@/lib/defaults";
 import type {
@@ -24,8 +16,7 @@ import type {
 const tabs = [
   { label: "武器箱", icon: Box },
   { label: "全局开关", icon: SlidersHorizontal },
-  { label: "冷却期", icon: Clock3 },
-  { label: "抓取", icon: Search },
+  { label: "冷却期/抓取", icon: Search },
 ];
 
 const emptyCase: CaseConfig = {
@@ -316,7 +307,7 @@ export function ConfigDashboard() {
       <div className="container">
         <header className="header">
           <div className="header-left">
-            <h1>Steam市场情报站 - 配置管理</h1>
+            <h1>Steam市场情报站</h1>
           </div>
           <div className="header-actions">
             <button
@@ -597,7 +588,7 @@ export function ConfigDashboard() {
               </button>
             </section>
 
-            <section className={`panel ${activeTab === 2 ? "active" : ""}`}>
+            <section className={`panel settings-panel ${activeTab === 2 ? "active" : ""}`}>
               <div className="panel-title">冷却期配置（天）</div>
               <div className="card-surface">
                 <div className="form-group">
@@ -667,9 +658,7 @@ export function ConfigDashboard() {
                   </button>
                 </div>
               </div>
-            </section>
 
-            <section className={`panel ${activeTab === 3 ? "active" : ""}`}>
               <div className="panel-title">抓取配置</div>
               <div className="card-surface">
                 <div className="form-group">
@@ -686,15 +675,6 @@ export function ConfigDashboard() {
                     value={settings.scrape.timeout}
                     min={5000}
                     onChange={(value) => updateScrape((current) => ({ ...current, timeout: value }))}
-                  />
-                  <NumberField
-                    label="最大并发数"
-                    value={settings.scrape.max_concurrency}
-                    min={1}
-                    max={8}
-                    onChange={(value) =>
-                      updateScrape((current) => ({ ...current, max_concurrency: value }))
-                    }
                   />
                 </div>
                 <button className="btn btn-success" onClick={() => void saveScrape()}>
@@ -1002,3 +982,4 @@ function TextField({
     </div>
   );
 }
+
