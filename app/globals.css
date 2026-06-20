@@ -796,6 +796,12 @@ body[data-theme="dark"] .ico-moon {
   }
 }
 
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 @keyframes modalEnter {
   from {
     opacity: 0;
@@ -807,6 +813,139 @@ body[data-theme="dark"] .ico-moon {
   }
 }
 
+
+.add-case-btn-top {
+  margin: 0 0 14px;
+}
+
+.case-card {
+  cursor: pointer;
+}
+
+.case-card:hover,
+.case-card:focus-visible {
+  box-shadow: 0 0 0 2px rgba(42, 171, 238, 0.2), var(--tg-shadow);
+  outline: none;
+  transform: translateY(-1px);
+}
+
+.lookup-form-group {
+  align-items: end;
+}
+
+.lookup-btn {
+  min-height: 42px;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  filter: grayscale(0.18);
+  opacity: 0.68;
+}
+
+.spin-icon {
+  animation: spin 900ms linear infinite;
+  height: 16px;
+  margin-right: 6px;
+  width: 16px;
+}
+
+.detail-modal-content {
+  max-width: 1080px;
+}
+
+.detail-subtitle {
+  color: var(--tg-muted);
+  font-size: 13px;
+  margin-top: 4px;
+}
+
+.detail-state {
+  align-items: center;
+  background: var(--status-bg);
+  border: 1px solid var(--tg-line);
+  border-radius: 8px;
+  color: var(--tg-muted);
+  display: flex;
+  font-weight: 700;
+  justify-content: center;
+  min-height: 120px;
+  padding: 18px;
+  text-align: center;
+}
+
+.detail-state-error,
+.detail-item-error {
+  color: var(--tg-danger);
+}
+
+.detail-items {
+  display: grid;
+  gap: 12px;
+}
+
+.detail-item {
+  background: var(--status-bg);
+  border: 1px solid var(--tg-line);
+  border-radius: 8px;
+  padding: 14px;
+}
+
+.detail-item-head {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.detail-item-head img,
+.detail-item-img-placeholder {
+  background: var(--input-bg);
+  border-radius: 8px;
+  flex: 0 0 auto;
+  height: 56px;
+  object-fit: contain;
+  width: 72px;
+}
+
+.detail-item h3 {
+  font-size: 15px;
+  line-height: 1.35;
+}
+
+.detail-item-meta,
+.detail-updated,
+.detail-item-error {
+  color: var(--tg-muted);
+  font-size: 12px;
+  margin-top: 5px;
+}
+
+.market-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.market-card {
+  background: var(--surface-solid);
+  border: 1px solid var(--tg-line);
+  border-radius: 8px;
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+}
+
+.market-card span,
+.market-card small {
+  color: var(--tg-muted);
+  font-size: 12px;
+}
+
+.market-card strong {
+  color: var(--tg-text);
+  font-size: 18px;
+}
 @media (max-width: 720px) {
   .container {
     padding-top: 10px;
@@ -836,7 +975,8 @@ body[data-theme="dark"] .ico-moon {
 
   .case-list,
   .form-group,
-  .switch-controls {
+  .switch-controls,
+  .market-grid {
     grid-template-columns: 1fr;
   }
 

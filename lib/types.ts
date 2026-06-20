@@ -67,3 +67,38 @@ export interface ApiResult {
   success: boolean;
   message?: string;
 }
+export interface CsqaqContainer {
+  id: number;
+  img?: string;
+  name: string;
+  comment?: string;
+  created_at?: string;
+}
+
+export interface CsqaqCaseDetailItem {
+  id: string;
+  name: string;
+  img?: string;
+  rarity?: string;
+  quality?: string;
+  buff_sell_price: number | null;
+  buff_sell_num: number | null;
+  yyyp_sell_price: number | null;
+  yyyp_sell_num: number | null;
+  steam_sell_price: number | null;
+  steam_sell_num: number | null;
+  updated_at?: string;
+  error?: string;
+}
+
+export interface CsqaqCaseDetail {
+  container?: CsqaqContainer;
+  items: CsqaqCaseDetailItem[];
+}
+
+export interface CsqaqLookupResult {
+  success: boolean;
+  container?: CsqaqContainer;
+  matches?: CsqaqContainer[];
+  message?: string;
+}

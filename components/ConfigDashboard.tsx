@@ -1,11 +1,13 @@
 "use client";
 
-import { Box, Moon, Search, SlidersHorizontal, Sun, X } from "lucide-react";
+import { Box, Loader2, Moon, Search, SlidersHorizontal, Sun, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { DEFAULT_SETTINGS } from "@/lib/defaults";
 import type {
   ApiResult,
   CaseConfig,
+  CsqaqCaseDetail,
+  CsqaqLookupResult,
   CaseState,
   CooldownConfig,
   ScrapeConfig,
@@ -40,6 +42,14 @@ type ToastState = {
 type CaseFormState = {
   id: string;
   data: CaseConfig;
+};
+
+type CaseDetailState = {
+  caseId: string;
+  caseName: string;
+  data: CsqaqCaseDetail | null;
+  loading: boolean;
+  error: string | null;
 };
 
 function formatDuration(seconds: number) {
@@ -92,6 +102,25 @@ function formatUptime(startTime: string | null) {
   }${hours}时${minutes}分${seconds}秒`;
 }
 
+function formatPrice(value: number | null) {
+  if (value === null || value === undefined) {
+    return "--";
+  }
+
+  return `￥${value.toLocaleString("zh-CN", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  })}`;
+}
+
+function formatCount(value: number | null) {
+  if (value === null || value === undefined) {
+    return "暂无在售";
+  }
+
+  return `${value.toLocaleString("zh-CN")}件在售`;
+}
+
 async function postJson<T>(url: string, payload?: T): Promise<ApiResult> {
   const response = await fetch(url, {
     method: "POST",
@@ -117,6 +146,8 @@ export function ConfigDashboard() {
     data: emptyCase,
   });
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isLookupLoading, setIsLookupLoading] = useState(false);
+  const [caseDetail, setCaseDetail] = useState<CaseDetailState | null>(null);
 
   const uptime = useMemo(
     () => formatUptime(serverStartTime),
@@ -246,6 +277,88 @@ export function ConfigDashboard() {
     setIsModalOpen(true);
   }
 
+
+  async function lookupCaseId() {
+    const name = caseForm.data.name.trim();
+    if (!name) {
+      showToast("请先输入武器箱中文名", "error");
+      return;
+    }
+
+    setIsLookupLoading(true);
+    try {
+      const response = await fetch(`/api/csqaq/containers/lookup?name=${encodeURIComponent(name)}`);
+      const data = (await response.json()) as CsqaqLookupResult;
+      if (!response.ok || !data.success || !data.container) {
+        showToast(data.message || "没有查询到对应武器箱", "error");
+        return;
+      }
+
+      setCaseForm((current) => ({
+        ...current,
+        id: String(data.container?.id ?? current.id),
+        data: {
+          ...current.data,
+          name: data.container?.name ?? current.data.name,
+        },
+      }));
+      showToast(`已匹配: ${data.container.name} / ID ${data.container.id}`);
+    } catch (error) {
+      showToast(`查询失败: ${error instanceof Error ? error.message : "未知错误"}`, "error");
+    } finally {
+      setIsLookupLoading(false);
+    }
+  }
+
+  async function openCaseDetail(caseId: string, caseData: CaseConfig) {
+    const fallbackName = caseData.name || caseId;
+    setCaseDetail({
+      caseId,
+      caseName: fallbackName,
+      data: null,
+      loading: true,
+      error: null,
+    });
+
+    try {
+      let containerId = /^\d+$/.test(caseId) ? caseId : "";
+      if (!containerId) {
+        const lookupResponse = await fetch(
+          `/api/csqaq/containers/lookup?name=${encodeURIComponent(fallbackName)}`,
+        );
+        const lookupData = (await lookupResponse.json()) as CsqaqLookupResult;
+        if (!lookupResponse.ok || !lookupData.success || !lookupData.container) {
+          throw new Error(lookupData.message || "无法匹配武器箱 ID");
+        }
+        containerId = String(lookupData.container.id);
+      }
+
+      const detailResponse = await fetch(
+        `/api/csqaq/containers/${encodeURIComponent(containerId)}/items?limit=20`,
+      );
+      const detailData = (await detailResponse.json()) as CsqaqCaseDetail & ApiResult;
+      if (!detailResponse.ok || detailData.success === false) {
+        throw new Error(detailData.message || "详情查询失败");
+      }
+
+      setCaseDetail({
+        caseId: containerId,
+        caseName: detailData.container?.name ?? fallbackName,
+        data: detailData,
+        loading: false,
+        error: null,
+      });
+    } catch (error) {
+      setCaseDetail((current) => ({
+        caseId: current?.caseId ?? caseId,
+        caseName: current?.caseName ?? fallbackName,
+        data: null,
+        loading: false,
+        error: error instanceof Error ? error.message : "详情查询失败",
+      }));
+    }
+  }
+
   async function saveCase() {
     const id = caseForm.id.trim();
     if (!id) {
@@ -335,6 +448,9 @@ export function ConfigDashboard() {
           <div className="pager-track" style={{ "--page": activeTab } as React.CSSProperties}>
             <section className={`panel ${activeTab === 0 ? "active" : ""}`}>
               <div className="panel-title">武器箱配置</div>
+              <button className="add-case-btn add-case-btn-top" onClick={openAddCaseModal}>
+                + 添加武器箱
+              </button>
               <div className="case-list cases-ready">
                 {Object.entries(settings.cases).map(([id, caseData], index) => {
                   const state = casesState[id] || {
@@ -354,7 +470,17 @@ export function ConfigDashboard() {
                       className={`case-card ${caseData.enabled === false ? "disabled" : ""}`}
                       data-initial={String(caseData.name || id).trim().charAt(0).toUpperCase()}
                       key={id}
+                      role="button"
+                      tabIndex={0}
+                      title="点击查看饰品市场详情"
                       style={{ "--card-index": Math.min(index, 8) } as React.CSSProperties}
+                      onClick={() => void openCaseDetail(id, caseData)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          void openCaseDetail(id, caseData);
+                        }
+                      }}
                     >
                       <div className="case-header">
                         <div>
@@ -404,18 +530,30 @@ export function ConfigDashboard() {
                         </div>
                       </div>
                       <div className="case-actions">
-                        <button className="btn btn-primary btn-small" onClick={() => editCase(id)}>
+                        <button
+                          className="btn btn-primary btn-small"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            editCase(id);
+                          }}
+                        >
                           编辑
                         </button>
                         <button
                           className="btn btn-warning btn-small"
-                          onClick={() => void resetCaseCooldown(id)}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void resetCaseCooldown(id);
+                          }}
                         >
                           重置
                         </button>
                         <button
                           className="btn btn-danger btn-small"
-                          onClick={() => void deleteCaseById(id)}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void deleteCaseById(id);
+                          }}
                         >
                           删除
                         </button>
@@ -424,9 +562,6 @@ export function ConfigDashboard() {
                   );
                 })}
               </div>
-              <button className="add-case-btn" onClick={openAddCaseModal}>
-                + 添加武器箱
-              </button>
             </section>
 
             <section className={`panel ${activeTab === 1 ? "active" : ""}`}>
@@ -733,14 +868,7 @@ export function ConfigDashboard() {
               <X aria-hidden="true" />
             </button>
           </div>
-          <div className="form-group">
-            <TextField
-              label="武器箱ID"
-              value={caseForm.id}
-              disabled={Boolean(editingCaseId)}
-              placeholder="例如: 1078"
-              onChange={(value) => setCaseForm((current) => ({ ...current, id: value }))}
-            />
+          <div className="form-group lookup-form-group">
             <TextField
               label="武器箱名称"
               value={caseForm.data.name}
@@ -751,6 +879,22 @@ export function ConfigDashboard() {
                   data: { ...current.data, name: value },
                 }))
               }
+            />
+            <button
+              className="btn btn-primary lookup-btn"
+              type="button"
+              disabled={Boolean(editingCaseId) || isLookupLoading}
+              onClick={() => void lookupCaseId()}
+            >
+              {isLookupLoading ? <Loader2 className="spin-icon" aria-hidden="true" /> : null}
+              查询饰品ID
+            </button>
+            <TextField
+              label="武器箱ID"
+              value={caseForm.id}
+              disabled={Boolean(editingCaseId)}
+              placeholder="输入中文名后点击查询自动填写"
+              onChange={(value) => setCaseForm((current) => ({ ...current, id: value }))}
             />
           </div>
           <div className="checkbox-group">
@@ -841,6 +985,73 @@ export function ConfigDashboard() {
               保存
             </button>
           </div>
+        </div>
+      </div>
+
+      <div
+        className={`modal ${caseDetail ? "show" : ""}`}
+        onMouseDown={(event) => {
+          if (event.target === event.currentTarget) {
+            setCaseDetail(null);
+          }
+        }}
+      >
+        <div className="modal-content detail-modal-content">
+          <div className="modal-header">
+            <div>
+              <h2>{caseDetail?.caseName || "武器箱详情"}</h2>
+              <div className="detail-subtitle">收藏品 ID: {caseDetail?.caseId || "--"}</div>
+            </div>
+            <button className="close" type="button" onClick={() => setCaseDetail(null)}>
+              <X aria-hidden="true" />
+            </button>
+          </div>
+
+          {caseDetail?.loading ? (
+            <div className="detail-state">
+              <Loader2 className="spin-icon" aria-hidden="true" />
+              正在查询前 20 个饰品的 BUFF、悠悠有品、Steam 在售价...
+            </div>
+          ) : caseDetail?.error ? (
+            <div className="detail-state detail-state-error">{caseDetail.error}</div>
+          ) : caseDetail?.data?.items.length ? (
+            <div className="detail-items">
+              {caseDetail.data.items.map((item) => (
+                <article className="detail-item" key={item.id}>
+                  <div className="detail-item-head">
+                    {item.img ? <img alt="" src={item.img} /> : <div className="detail-item-img-placeholder" />}
+                    <div>
+                      <h3>{item.name}</h3>
+                      <div className="detail-item-meta">
+                        {[item.rarity, item.quality].filter(Boolean).join(" / ") || "饰品"}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="market-grid">
+                    <div className="market-card">
+                      <span>网易BUFF</span>
+                      <strong>{formatPrice(item.buff_sell_price)}</strong>
+                      <small>{formatCount(item.buff_sell_num)}</small>
+                    </div>
+                    <div className="market-card">
+                      <span>悠悠有品</span>
+                      <strong>{formatPrice(item.yyyp_sell_price)}</strong>
+                      <small>{formatCount(item.yyyp_sell_num)}</small>
+                    </div>
+                    <div className="market-card">
+                      <span>Steam市场</span>
+                      <strong>{formatPrice(item.steam_sell_price)}</strong>
+                      <small>{formatCount(item.steam_sell_num)}</small>
+                    </div>
+                  </div>
+                  {item.error ? <div className="detail-item-error">{item.error}</div> : null}
+                  {item.updated_at ? <div className="detail-updated">更新时间: {item.updated_at}</div> : null}
+                </article>
+              ))}
+            </div>
+          ) : (
+            <div className="detail-state">暂无饰品详情数据</div>
+          )}
         </div>
       </div>
     </>

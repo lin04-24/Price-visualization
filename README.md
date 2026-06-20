@@ -4,8 +4,9 @@ Steam 市场情报站配置管理面板。项目已迁移为 Next.js App Router 
 
 ## 功能概览
 
-- 武器箱配置管理：新增、编辑、删除、启用/禁用监控。
+- 武器箱配置管理：新增、编辑、删除、启用/禁用监控，并可点击武器箱查看饰品市场详情。
 - 全局开关配置：BUFF / 悠悠有品、Steam、涨跌幅监控。
+- CSQAQ 接入：通过武器箱中文名查询收藏品 ID，并展示饰品在网易 BUFF、悠悠有品、Steam 市场的在售价。
 - 冷却期配置：按不同规则设置冷却天数，并支持一键重置。
 - 抓取配置：执行间隔、页面超时；抓取固定为单线程，不并发。
 - 本地 SQLite 持久化：默认数据库为 `data/app.db`。
@@ -29,6 +30,16 @@ Steam 市场情报站配置管理面板。项目已迁移为 Next.js App Router 
 node --version
 npm --version
 ```
+
+## 环境变量
+
+项目通过 CSQAQ API 查询武器箱 ID 和饰品市场价格。请在项目根目录创建 `.env`：
+
+```powershell
+CSQAQ_API_TOKEN=你的 CSQAQ API Token
+```
+
+`.env` 已被 `.gitignore` 忽略，不会提交到 GitHub。修改环境变量后需要重新启动 Next.js 服务。
 
 ## 本地开发部署
 
